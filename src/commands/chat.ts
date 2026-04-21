@@ -4,6 +4,7 @@ import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
 import { runCommand } from '../lib/runner.ts'
+import { confirmOrAbort } from '../lib/trust/confirm.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson, validateBody } from '../lib/validation/params.ts'
 import { buildFilesInitBody, readSource } from '../lib/workflows/init-from-local.ts'
@@ -352,13 +353,19 @@ export function chatCommand(): Command {
       }),
     )
 
-  // chat delete is T2 — V3 adds the interactive confirm gate. Surface now so agents can plan.
   cmd
     .command('delete <chat-id>')
-    .description('Delete a chat (T2 — requires --yes in V3; not yet enforced)')
+    .description('Delete a chat (T2 — interactive confirm in TTY, --yes for agents).')
     .action(
-      runCommand(async ({ client, mode, cmd, recordResult }) => {
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
         const [chatId] = cmd.args as [string]
+        await confirmOrAbort({
+          title: 'Delete chat',
+          preview: { chat: chatId },
+          question: `Really delete chat ${chatId}?`,
+          yes: !!opts.yes,
+          mode,
+        })
         const res = await client.chats.delete({ chatId })
         recordResult(res)
         if (mode === 'json') return emitSuccess(res)

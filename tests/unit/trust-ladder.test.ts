@@ -23,6 +23,8 @@ describe('classifyCommand', () => {
   test('confirm-required writes are T2', () => {
     expect(classifyCommand(['deploy', 'create'])).toBe('T2')
     expect(classifyCommand(['chat', 'delete'])).toBe('T2')
+    expect(classifyCommand(['hook', 'update'])).toBe('T2')
+    expect(classifyCommand(['version', 'files-delete'])).toBe('T2')
   })
 
   test('destructive ops are T3', () => {

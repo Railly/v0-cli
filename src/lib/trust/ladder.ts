@@ -56,7 +56,7 @@ const TRUST_MAP: Record<string, TrustLevel> = {
   'chat delete': 'T2',
   'hook update': 'T2',
   'mcp-server update': 'T2',
-  'version files delete': 'T2',
+  'version files-delete': 'T2',
   // `project delete` (no cascade) is T2 — see classifyProjectDelete()
 
   // T3: killswitch (intent token)

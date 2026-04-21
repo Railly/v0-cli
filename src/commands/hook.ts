@@ -2,13 +2,12 @@ import { Command } from 'commander'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
+import { confirmOrAbort } from '../lib/trust/confirm.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
 export function hookCommand(): Command {
-  const cmd = new Command('hook').description(
-    'Webhooks (list, show, create). Delete/update arrive later.',
-  )
+  const cmd = new Command('hook').description('Webhooks (list, show, create, update).')
 
   cmd
     .command('list')
@@ -70,6 +69,48 @@ export function hookCommand(): Command {
         if (mode === 'json') return emitSuccess(res)
         const detail = res as unknown as { id?: string }
         process.stdout.write(`${bullet(`hook created → ${color.accent(detail.id ?? '?')}`)}\n`)
+      }),
+    )
+
+  cmd
+    .command('update <hook-id>')
+    .description('Update a webhook (T2 — exfiltration surface; interactive confirm in TTY).')
+    .option('--name <n>', 'new name')
+    .option('--url <url>', 'new delivery URL')
+    .option('--events <list>', 'new event list', parseList)
+    .option('--params <json>', 'raw JSON body')
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const [hookId] = cmd.args as [string]
+        const raw = cmd.opts<{
+          name?: string
+          url?: string
+          events?: string[]
+          params?: string
+        }>()
+        const sugar: Record<string, unknown> = {}
+        if (raw.name) sugar.name = raw.name
+        if (raw.url) sugar.url = raw.url
+        if (raw.events) sugar.events = raw.events
+        const body = mergeParams(sugar, parseParamsJson(raw.params))
+        const preview: Record<string, string> = { hook: hookId }
+        if (body.name) preview.name = String(body.name)
+        if (body.url) preview.url = String(body.url)
+        if (body.events) preview.events = (body.events as string[]).join(', ')
+        await confirmOrAbort({
+          title: 'Update webhook',
+          preview,
+          question: 'Apply update?',
+          yes: !!opts.yes,
+          mode,
+        })
+        const res = await client.hooks.update({
+          hookId,
+          ...(body as Omit<Parameters<typeof client.hooks.update>[0], 'hookId'>),
+        })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`updated hook ${color.accent(hookId)}`)}\n`)
       }),
     )
 

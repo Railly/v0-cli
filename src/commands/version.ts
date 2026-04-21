@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
+import { confirmOrAbort } from '../lib/trust/confirm.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
@@ -84,6 +85,39 @@ export function versionCommand(): Command {
         recordResult(res)
         if (mode === 'json') return emitSuccess(res)
         process.stdout.write(`${bullet(`updated version ${color.accent(versionId)}`)}\n`)
+      }),
+    )
+
+  cmd
+    .command('files-delete <chat-id> <version-id>')
+    .description('Delete files from a version (T2 — interactive confirm in TTY, --yes for agents).')
+    .requiredOption('--paths <list>', 'comma-separated file paths to delete')
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const [chatId, versionId] = cmd.args as [string, string]
+        const raw = cmd.opts<{ paths: string }>()
+        const filePaths = raw.paths
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        if (!filePaths.length) throw new Error('--paths must contain at least one file path')
+        await confirmOrAbort({
+          title: 'Delete files from version',
+          preview: {
+            chat: chatId,
+            version: versionId,
+            files: filePaths.join(', '),
+          },
+          question: `Delete ${filePaths.length} file(s)?`,
+          yes: !!opts.yes,
+          mode,
+        })
+        const res = await client.chats.deleteVersionFiles({ chatId, versionId, filePaths })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(
+          `${bullet(`deleted ${filePaths.length} file(s) from ${color.accent(versionId)}`)}\n`,
+        )
       }),
     )
 

@@ -59,11 +59,6 @@ export function runCommand(fn: RunFn): (...args: unknown[]) => Promise<void> {
     const profile = await loadProfile(profileName)
     const trust = classifyCommand(commandPath)
 
-    // Killswitch pre-check for T2+.
-    if (trust === 'T2' || trust === 'T3') {
-      await assertKillswitchOff(`${commandPath.join(' ')}`)
-    }
-
     const audit = await auditStart({
       cmd: `v0 ${commandPath.join(' ')}`,
       trustLevel: trust,
@@ -78,6 +73,11 @@ export function runCommand(fn: RunFn): (...args: unknown[]) => Promise<void> {
     }
 
     try {
+      // Killswitch pre-check for T2+ (inside try so errors route through the normal JSON/human path).
+      if (trust === 'T2' || trust === 'T3') {
+        await assertKillswitchOff(`${commandPath.join(' ')}`)
+      }
+
       const client = buildClient({
         profile,
         ...(opts.apiKey !== undefined ? { apiKey: opts.apiKey } : {}),
