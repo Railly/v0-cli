@@ -3,8 +3,10 @@ import { bullet, kv, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
 import { confirmOrAbort } from '../lib/trust/confirm.ts'
+import { requireIntent } from '../lib/trust/require-intent.ts'
 import { color } from '../lib/ui/color.ts'
 import { CliError } from '../lib/utils/errors.ts'
+import { readBatchItems, runBatch } from '../lib/workflows/batch.ts'
 import { buildDeployPreview, pollDeployment } from '../lib/workflows/deploy-and-wait.ts'
 
 export function deployCommand(): Command {
@@ -209,11 +211,75 @@ export function deployCommand(): Command {
     )
 
   cmd
-    .command('delete <deployment-id>')
-    .description('Delete a deployment (T3 — intent token required; not yet enforced in V3)')
+    .command('batch')
+    .description(
+      'Deploy many versions sequentially. Reads NDJSON of {chatId, versionId, projectId?} from --from or stdin. T2 per item.',
+    )
+    .option('--from <path>', 'source file (ndjson or json array). omit for stdin.')
+    .option('--on-error <mode>', 'continue|stop', 'continue')
     .action(
-      runCommand(async ({ client, mode, cmd, recordResult }) => {
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const raw = cmd.opts<{ from?: string; onError?: 'continue' | 'stop' }>()
+        const items =
+          (await readBatchItems<{
+            chatId: string
+            versionId: string
+            projectId?: string
+          }>(raw.from ?? 'stdin')) ?? []
+        if (!items.length) throw new Error('batch input is empty')
+        if (!opts.yes) {
+          await confirmOrAbort({
+            title: `Batch deploy ${items.length} version(s)`,
+            preview: {
+              count: String(items.length),
+              onError: raw.onError ?? 'continue',
+            },
+            question: 'Start batch?',
+            yes: false,
+            mode,
+          })
+        }
+        const { summary, entries } = await runBatch({
+          items,
+          label: 'deploy',
+          ndjson: mode === 'json',
+          onError: raw.onError ?? 'continue',
+          run: async ({ idx, item }) => {
+            const preview = await buildDeployPreview(client, {
+              chatId: item.chatId,
+              versionId: item.versionId,
+              ...(item.projectId ? { projectId: item.projectId } : {}),
+            })
+            if (!preview.projectId)
+              throw new Error(`item ${idx}: could not resolve projectId for ${item.chatId}`)
+            return client.deployments.create({
+              projectId: preview.projectId,
+              chatId: item.chatId,
+              versionId: item.versionId,
+            })
+          },
+        })
+        recordResult({ summary, entries: entries.length })
+        if (mode === 'json') return emitSuccess({ summary })
+        process.stdout.write(`${section('batch summary')}\n`)
+        process.stdout.write(`${kv('total', summary.total)}\n`)
+        process.stdout.write(`${kv('ok', summary.ok)}\n`)
+        process.stdout.write(`${kv('errors', summary.errors)}\n`)
+        process.stdout.write(`${kv('skipped', summary.skipped)}\n`)
+      }),
+    )
+
+  cmd
+    .command('delete <deployment-id>')
+    .description('Delete a deployment (T3 — requires --confirm <intent-token>)')
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
         const [deploymentId] = cmd.args as [string]
+        await requireIntent({
+          token: opts.confirm,
+          action: 'deploy delete',
+          params: { deploymentId },
+        })
         const res = await client.deployments.delete({ deploymentId })
         recordResult(res)
         if (mode === 'json') return emitSuccess(res)

@@ -6,8 +6,10 @@ import { authCommand } from './commands/auth.ts'
 import { chatCommand } from './commands/chat.ts'
 import { deployCommand } from './commands/deploy.ts'
 import { doctorCommand } from './commands/doctor.ts'
+import { envCommand } from './commands/env.ts'
 import { hookCommand } from './commands/hook.ts'
 import { integrationsCommand } from './commands/integrations.ts'
+import { intentCommand } from './commands/intent.ts'
 import { killswitchCommand } from './commands/killswitch.ts'
 import { mcpServerCommand } from './commands/mcp-server.ts'
 import { msgCommand } from './commands/msg.ts'
@@ -46,6 +48,8 @@ program.addCommand(authCommand())
 program.addCommand(userCommand())
 program.addCommand(rateLimitsCommand())
 program.addCommand(doctorCommand())
+program.addCommand(envCommand())
+program.addCommand(intentCommand())
 program.addCommand(projectCommand())
 program.addCommand(chatCommand())
 program.addCommand(versionCommand())

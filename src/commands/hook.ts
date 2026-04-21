@@ -3,6 +3,7 @@ import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
 import { confirmOrAbort } from '../lib/trust/confirm.ts'
+import { requireIntent } from '../lib/trust/require-intent.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
@@ -111,6 +112,26 @@ export function hookCommand(): Command {
         recordResult(res)
         if (mode === 'json') return emitSuccess(res)
         process.stdout.write(`${bullet(`updated hook ${color.accent(hookId)}`)}\n`)
+      }),
+    )
+
+  cmd
+    .command('delete <hook-id>')
+    .description(
+      'Delete a webhook (T3 — requires --confirm <intent-token> from `v0 intent issue "hook delete"`)',
+    )
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const [hookId] = cmd.args as [string]
+        await requireIntent({
+          token: opts.confirm,
+          action: 'hook delete',
+          params: { hookId },
+        })
+        const res = await client.hooks.delete({ hookId })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`deleted hook ${color.accent(hookId)}`)}\n`)
       }),
     )
 

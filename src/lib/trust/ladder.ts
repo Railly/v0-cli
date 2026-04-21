@@ -49,14 +49,26 @@ const TRUST_MAP: Record<string, TrustLevel> = {
   'hook create': 'T1',
   'mcp-server create': 'T1',
   'integrations vercel link': 'T1',
-  // `env set` is resolved dynamically — see classifyEnvSet()
+  'env list': 'T0',
+  'env get': 'T0',
+  'env set': 'T1', // dynamically upgraded to T2 in handler via classifyEnvSet()
+  'env update': 'T1',
+  'env push': 'T1',
+  // `env pull` reveals secrets to disk — T2 even though it's a read
+  'env pull': 'T2',
+  'env delete': 'T2',
+  'intent issue': 'T1',
+  'intent list': 'T0',
+  'intent purge': 'T1',
 
   // T2: confirm
   'deploy create': 'T2',
+  'deploy batch': 'T2',
   'chat delete': 'T2',
   'hook update': 'T2',
   'mcp-server update': 'T2',
   'version files-delete': 'T2',
+  'project delete': 'T2', // escalates to T3 in handler when --delete-all-chats
   // `project delete` (no cascade) is T2 — see classifyProjectDelete()
 
   // T3: killswitch (intent token)

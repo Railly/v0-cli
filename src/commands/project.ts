@@ -2,6 +2,8 @@ import { Command } from 'commander'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
+import { confirmOrAbort } from '../lib/trust/confirm.ts'
+import { requireIntent } from '../lib/trust/require-intent.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
@@ -140,6 +142,41 @@ export function projectCommand(): Command {
         process.stdout.write(
           `${bullet(`assigned chat ${color.accent(chatId)} → project ${color.accent(projectId)}`)}\n`,
         )
+      }),
+    )
+
+  cmd
+    .command('delete <project-id>')
+    .description(
+      'Delete a project. Without --delete-all-chats → T2 (confirm). With --delete-all-chats → T3 (intent token).',
+    )
+    .option('--delete-all-chats', 'also delete every chat in the project')
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const [projectId] = cmd.args as [string]
+        const raw = cmd.opts<{ deleteAllChats?: boolean }>()
+        if (raw.deleteAllChats) {
+          await requireIntent({
+            token: opts.confirm,
+            action: 'project delete --delete-all-chats',
+            params: { projectId },
+          })
+        } else {
+          await confirmOrAbort({
+            title: 'Delete project (chats preserved)',
+            preview: { project: projectId },
+            question: 'Delete project?',
+            yes: !!opts.yes,
+            mode,
+          })
+        }
+        const res = await client.projects.delete({
+          projectId,
+          ...(raw.deleteAllChats ? { deleteAllChats: true } : {}),
+        })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`deleted project ${color.accent(projectId)}`)}\n`)
       }),
     )
 

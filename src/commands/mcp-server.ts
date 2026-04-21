@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
+import { requireIntent } from '../lib/trust/require-intent.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
@@ -81,6 +82,24 @@ export function mcpServerCommand(): Command {
         process.stdout.write(
           `${bullet(`mcp server created → ${color.accent(detail.id ?? '?')}`)}\n`,
         )
+      }),
+    )
+
+  cmd
+    .command('delete <mcp-server-id>')
+    .description('Delete a registered MCP server (T3 — requires --confirm <intent-token>)')
+    .action(
+      runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
+        const [mcpServerId] = cmd.args as [string]
+        await requireIntent({
+          token: opts.confirm,
+          action: 'mcp-server delete',
+          params: { mcpServerId },
+        })
+        const res = await client.mcpServers.delete({ mcpServerId })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`deleted mcp server ${color.accent(mcpServerId)}`)}\n`)
       }),
     )
 
