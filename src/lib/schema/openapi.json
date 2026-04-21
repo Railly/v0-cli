@@ -61,13 +61,7 @@
                     "default": "private",
                     "description": "Determines the privacy setting of the chat. This can control whether the chat is visible only to the user, to team members, or is public.",
                     "type": "string",
-                    "enum": [
-                      "public",
-                      "private",
-                      "team-edit",
-                      "team",
-                      "unlisted"
-                    ]
+                    "enum": ["public", "private", "team-edit", "team", "unlisted"]
                   },
                   "projectId": {
                     "description": "Associates the chat with a specific project in your workspace. Helps organize and group related chats under a common project context.",
@@ -82,13 +76,7 @@
                         "description": "Deprecated Model ID field preserved for backward compatibility.",
                         "deprecated": true,
                         "type": "string",
-                        "enum": [
-                          "v0-auto",
-                          "v0-mini",
-                          "v0-pro",
-                          "v0-max",
-                          "v0-max-fast"
-                        ]
+                        "enum": ["v0-auto", "v0-mini", "v0-pro", "v0-max", "v0-max-fast"]
                       },
                       "imageGenerations": {
                         "default": false,
@@ -436,13 +424,7 @@
                         "default": "private",
                         "description": "Controls the visibility of the chat. Defines whether the chat is private, shared with a team, or publicly accessible.",
                         "type": "string",
-                        "enum": [
-                          "public",
-                          "private",
-                          "team-edit",
-                          "team",
-                          "unlisted"
-                        ]
+                        "enum": ["public", "private", "team-edit", "team", "unlisted"]
                       },
                       "projectId": {
                         "description": "Associates the chat with a specific project. Useful for organizing and grouping chats in a workspace.",
@@ -992,13 +974,7 @@
                   "privacy": {
                     "description": "Sets the privacy level of the chat.",
                     "type": "string",
-                    "enum": [
-                      "public",
-                      "private",
-                      "team",
-                      "team-edit",
-                      "unlisted"
-                    ]
+                    "enum": ["public", "private", "team", "team-edit", "unlisted"]
                   },
                   "metadata": {
                     "description": "Arbitrary key-value data to attach to the chat. Useful for storing additional data about the chat, such as external user IDs. Metadata added will be merged with existing attributes. Pass `null` as the value to delete a specific key, or pass `null` instead of an object to delete all existing metadata.",
@@ -1313,13 +1289,7 @@
                     "default": "private",
                     "description": "Determines the privacy setting of the forked chat. This can control whether the chat is visible only to the user, to team members, or is public.",
                     "type": "string",
-                    "enum": [
-                      "public",
-                      "private",
-                      "team",
-                      "team-edit",
-                      "unlisted"
-                    ]
+                    "enum": ["public", "private", "team", "team-edit", "unlisted"]
                   }
                 },
                 "additionalProperties": false
@@ -1765,13 +1735,7 @@
                         "description": "Deprecated Model ID field preserved for backward compatibility.",
                         "deprecated": true,
                         "type": "string",
-                        "enum": [
-                          "v0-auto",
-                          "v0-mini",
-                          "v0-pro",
-                          "v0-max",
-                          "v0-max-fast"
-                        ]
+                        "enum": ["v0-auto", "v0-mini", "v0-pro", "v0-max", "v0-max-fast"]
                       },
                       "imageGenerations": {
                         "default": false,
@@ -3651,14 +3615,7 @@
                             "description": "Object type identifier."
                           }
                         },
-                        "required": [
-                          "createdAt",
-                          "deploymentId",
-                          "id",
-                          "text",
-                          "type",
-                          "object"
-                        ],
+                        "required": ["createdAt", "deploymentId", "id", "text", "type", "object"],
                         "additionalProperties": false
                       },
                       "description": "Array of log entries."
@@ -6507,12 +6464,7 @@
                           "description": "Whether the user is within the 48-hour grace period for new users, during which usage tracking is disabled."
                         }
                       },
-                      "required": [
-                        "limit",
-                        "remaining",
-                        "reset",
-                        "isWithinGracePeriod"
-                      ],
+                      "required": ["limit", "remaining", "reset", "isWithinGracePeriod"],
                       "additionalProperties": false
                     }
                   },
@@ -6823,13 +6775,7 @@
                               "additionalProperties": false
                             }
                           },
-                          "required": [
-                            "plan",
-                            "role",
-                            "billingCycle",
-                            "balance",
-                            "onDemand"
-                          ],
+                          "required": ["plan", "role", "billingCycle", "balance", "onDemand"],
                           "additionalProperties": false
                         }
                       },
@@ -7570,11 +7516,7 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": [
-                                      "V0Builder",
-                                      "V0Chatter",
-                                      "V0Viewer"
-                                    ]
+                                    "enum": ["V0Builder", "V0Chatter", "V0Viewer"]
                                   },
                                   {
                                     "type": "null"
@@ -7859,12 +7801,7 @@
                             "properties": {
                               "type": {
                                 "type": "string",
-                                "enum": [
-                                  "none",
-                                  "bearer",
-                                  "custom-headers",
-                                  "oauth"
-                                ],
+                                "enum": ["none", "bearer", "custom-headers", "oauth"],
                                 "description": "The type of authentication configured."
                               }
                             },
@@ -9343,14 +9280,7 @@
                 "finishReason": {
                   "description": "The reason why the message generation finished.",
                   "type": "string",
-                  "enum": [
-                    "stop",
-                    "length",
-                    "content-filter",
-                    "tool-calls",
-                    "error",
-                    "other"
-                  ]
+                  "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"]
                 },
                 "apiUrl": {
                   "type": "string",
@@ -9461,13 +9391,7 @@
                 "description": "Deprecated Model ID field preserved for backward compatibility.",
                 "deprecated": true,
                 "type": "string",
-                "enum": [
-                  "v0-auto",
-                  "v0-mini",
-                  "v0-pro",
-                  "v0-max",
-                  "v0-max-fast"
-                ]
+                "enum": ["v0-auto", "v0-mini", "v0-pro", "v0-max", "v0-max-fast"]
               },
               "imageGenerations": {
                 "default": false,
@@ -9860,14 +9784,7 @@
                   "type": "number"
                 }
               },
-              "required": [
-                "id",
-                "object",
-                "key",
-                "value",
-                "decrypted",
-                "createdAt"
-              ],
+              "required": ["id", "object", "key", "value", "decrypted", "createdAt"],
               "additionalProperties": false,
               "description": "Detailed information for an environment variable including its value."
             },
@@ -10263,14 +10180,7 @@
                   "description": "URL to the integration icon."
                 }
               },
-              "required": [
-                "id",
-                "object",
-                "slug",
-                "name",
-                "description",
-                "iconUrl"
-              ],
+              "required": ["id", "object", "slug", "name", "description", "iconUrl"],
               "additionalProperties": false,
               "description": "Detailed information about an integration."
             },
@@ -10632,14 +10542,7 @@
           "finishReason": {
             "description": "The reason why the message generation finished.",
             "type": "string",
-            "enum": [
-              "stop",
-              "length",
-              "content-filter",
-              "tool-calls",
-              "error",
-              "other"
-            ]
+            "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"]
           },
           "apiUrl": {
             "type": "string",
@@ -11033,14 +10936,7 @@
           "finishReason": {
             "description": "The reason why the message generation finished.",
             "type": "string",
-            "enum": [
-              "stop",
-              "length",
-              "content-filter",
-              "tool-calls",
-              "error",
-              "other"
-            ]
+            "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"]
           },
           "apiUrl": {
             "type": "string",
@@ -11090,16 +10986,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "object",
-          "content",
-          "createdAt",
-          "type",
-          "role",
-          "apiUrl",
-          "authorId"
-        ],
+        "required": ["id", "object", "content", "createdAt", "type", "role", "apiUrl", "authorId"],
         "additionalProperties": false,
         "description": "Summary of a single message within a chat, including role, content, type, timestamp, and API URL."
       },
@@ -11439,14 +11326,7 @@
                 "finishReason": {
                   "description": "The reason why the message generation finished.",
                   "type": "string",
-                  "enum": [
-                    "stop",
-                    "length",
-                    "content-filter",
-                    "tool-calls",
-                    "error",
-                    "other"
-                  ]
+                  "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"]
                 },
                 "apiUrl": {
                   "type": "string",
@@ -11628,14 +11508,7 @@
                   "description": "URL to the product icon."
                 }
               },
-              "required": [
-                "object",
-                "id",
-                "slug",
-                "name",
-                "description",
-                "iconUrl"
-              ],
+              "required": ["object", "id", "slug", "name", "description", "iconUrl"],
               "additionalProperties": false,
               "description": "Summary information about a marketplace or store product."
             },
@@ -11754,13 +11627,7 @@
                 },
                 "privacy": {
                   "type": "string",
-                  "enum": [
-                    "public",
-                    "private",
-                    "team",
-                    "team-edit",
-                    "unlisted"
-                  ],
+                  "enum": ["public", "private", "team", "team-edit", "unlisted"],
                   "description": "Defines the visibility of the chat—private, team-only, or public."
                 },
                 "name": {
@@ -11862,16 +11729,7 @@
             "description": "List of all chats that are associated with this project."
           }
         },
-        "required": [
-          "id",
-          "object",
-          "name",
-          "privacy",
-          "createdAt",
-          "apiUrl",
-          "webUrl",
-          "chats"
-        ],
+        "required": ["id", "object", "name", "privacy", "createdAt", "apiUrl", "webUrl", "chats"],
         "additionalProperties": false,
         "description": "Full representation of a project, including its associated chats."
       },
@@ -11923,15 +11781,7 @@
             "description": "The web URL where the project can be viewed or managed."
           }
         },
-        "required": [
-          "id",
-          "object",
-          "name",
-          "privacy",
-          "createdAt",
-          "apiUrl",
-          "webUrl"
-        ],
+        "required": ["id", "object", "name", "privacy", "createdAt", "apiUrl", "webUrl"],
         "additionalProperties": false,
         "description": "Summary of a project, including metadata, timestamps, and optional Vercel linkage."
       },

@@ -2,11 +2,13 @@ import type { Command } from 'commander'
 import type { createClient } from 'v0-sdk'
 import type { GlobalOpts } from '../types/cli.ts'
 import { apiKeyPrefix, buildClient } from './api/client.ts'
-import { auditFinish, auditStart, type TrustLevel } from './audit/jsonl.ts'
+import { type AuditEntry, auditFinish, auditStart, type TrustLevel } from './audit/jsonl.ts'
 import { activeProfileName, loadProfile, type Profile, resolveApiKey } from './config/profiles.ts'
 import { emitError, emitSuccess } from './output/json.ts'
+import { assertRateLimitOk } from './rate-limits/preflight.ts'
 import { assertKillswitchOff } from './trust/killswitch.ts'
 import { classifyCommand } from './trust/ladder.ts'
+import { color } from './ui/color.ts'
 import { exitCodeFor, normalizeError } from './utils/errors.ts'
 import { detectDefaultMode } from './utils/tty.ts'
 
@@ -20,6 +22,8 @@ export interface CommandContext {
   mode: 'human' | 'json'
   commandPath: string[]
   trust: TrustLevel
+  audit: AuditEntry
+  recordResult: (result: unknown) => void
 }
 
 type RunFn = (ctx: CommandContext) => Promise<void>
@@ -68,14 +72,53 @@ export function runCommand(fn: RunFn): (...args: unknown[]) => Promise<void> {
       dryRun: !!opts.dryRun,
     })
 
+    let capturedResult: unknown
+    const recordResult = (result: unknown) => {
+      capturedResult = result
+    }
+
     try {
       const client = buildClient({
         profile,
         ...(opts.apiKey !== undefined ? { apiKey: opts.apiKey } : {}),
         ...(opts.baseUrl !== undefined ? { baseUrl: opts.baseUrl } : {}),
       })
-      await fn({ program, cmd, opts, profile, profileName, client, mode, commandPath, trust })
-      await auditFinish(audit, { status: 'ok' })
+
+      // Rate-limit pre-flight for writes (T1+). T0 reads skip to avoid N+1 /rate-limits calls.
+      if ((trust === 'T1' || trust === 'T2' || trust === 'T3') && !opts.dryRun) {
+        try {
+          await assertRateLimitOk(client, profile, {
+            ...(opts.scope !== undefined ? { scope: opts.scope } : {}),
+            ...(opts.force !== undefined ? { force: opts.force } : {}),
+            outputMode: mode,
+          })
+        } catch (err) {
+          // In human mode we warn; in JSON we re-throw so the CLI exits 3.
+          if (mode === 'human' && err instanceof Error && /Rate limit low/.test(err.message)) {
+            process.stderr.write(`${color.warn('[rate-limit]')} ${err.message}\n`)
+          } else {
+            throw err
+          }
+        }
+      }
+
+      await fn({
+        program,
+        cmd,
+        opts,
+        profile,
+        profileName,
+        client,
+        mode,
+        commandPath,
+        trust,
+        audit,
+        recordResult,
+      })
+      await auditFinish(audit, {
+        status: 'ok',
+        ...(capturedResult !== undefined ? { result: capturedResult } : {}),
+      })
     } catch (err) {
       const normalized = normalizeError(err)
       normalized.command = `v0 ${commandPath.join(' ')}`

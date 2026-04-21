@@ -1,11 +1,14 @@
 import { Command } from 'commander'
-import { section, table } from '../lib/output/human.ts'
+import { readSseStream } from '../lib/api/streaming.ts'
+import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
+import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
 import { runCommand } from '../lib/runner.ts'
 import { color } from '../lib/ui/color.ts'
+import { mergeParams, parseParamsJson, validateBody } from '../lib/validation/params.ts'
 
 export function msgCommand(): Command {
-  const cmd = new Command('msg').description('Read chat messages (list, show). Send lands in V2.')
+  const cmd = new Command('msg').description('Chat messages (list, show, send, resume, stop).')
 
   cmd
     .command('list <chat-id>')
@@ -21,9 +24,8 @@ export function msgCommand(): Command {
         if (raw.cursor) params.cursor = raw.cursor
         const res = await client.chats.findMessages(params)
         if (mode === 'json') return emitSuccess(res)
-        const rows = ((res as { data?: Array<Record<string, unknown>> }).data ?? []) as Array<
-          Record<string, unknown>
-        >
+        const rows = ((res as unknown as { data?: Array<Record<string, unknown>> }).data ??
+          []) as Array<Record<string, unknown>>
         process.stdout.write(`${section(`messages of ${chatId} (${rows.length})`)}\n`)
         process.stdout.write(
           `${table(rows, [
@@ -45,6 +47,111 @@ export function msgCommand(): Command {
         if (mode === 'json') return emitSuccess(res)
         process.stdout.write(`${section(`message ${messageId}`)}\n`)
         process.stdout.write(`${color.dim(JSON.stringify(res, null, 2))}\n`)
+      }),
+    )
+
+  cmd
+    .command('send <chat-id> [message...]')
+    .description('Send a follow-up message (T1). --stream for SSE, --params for full body.')
+    .option('--message <msg>', 'user prompt (alternative to positional)')
+    .option('--system <msg>', 'system prompt')
+    .option('--model <id>', 'modelConfiguration.modelId')
+    .option('--thinking', 'enable modelConfiguration.thinking')
+    .option('--stream', 'use experimental_stream (SSE → NDJSON)')
+    .option('--params <json>', 'raw JSON body, merged with sugar flags')
+    .action(
+      runCommand(async ({ client, mode, profile, cmd, recordResult }) => {
+        const [chatId, ...rest] = cmd.args as string[]
+        if (!chatId) throw new Error('chat id required')
+        const raw = cmd.opts<{
+          message?: string
+          system?: string
+          model?: string
+          thinking?: boolean
+          stream?: boolean
+          params?: string
+        }>()
+
+        const positional = rest.join(' ').trim()
+        const message = raw.message ?? (positional || undefined)
+        const sugar: Record<string, unknown> = {}
+        if (message) sugar.message = message
+        if (raw.system) sugar.system = raw.system
+        if (raw.model || raw.thinking) {
+          sugar.modelConfiguration = {
+            ...(raw.model !== undefined
+              ? { modelId: raw.model }
+              : profile.defaults?.model_id
+                ? { modelId: profile.defaults.model_id }
+                : {}),
+            ...(raw.thinking ? { thinking: true } : {}),
+          }
+        }
+
+        const body = mergeParams(sugar, parseParamsJson(raw.params), (key) => {
+          if (mode === 'human') {
+            process.stderr.write(`${color.warn('[merge]')} --params overrode sugar flag "${key}"\n`)
+          }
+        })
+
+        await validateBody({ operationId: 'chats.sendMessage', body })
+
+        if (raw.stream) {
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.warn('[stream]')} SSE has no resume; a network flap requires re-sending the message.\n`,
+            )
+          }
+          const stream = (await client.chats.sendMessage({
+            chatId,
+            ...(body as Omit<Parameters<typeof client.chats.sendMessage>[0], 'chatId'>),
+            responseMode: 'experimental_stream',
+          })) as unknown as ReadableStream<Uint8Array>
+          let lastFrame: unknown = null
+          for await (const frame of readSseStream(stream)) {
+            lastFrame = frame.data
+            emitNdjsonEvent(frame.event, frame.data)
+          }
+          recordResult({ streamed: true, lastFrame })
+          return
+        }
+
+        const res = await client.chats.sendMessage({
+          chatId,
+          ...(body as Omit<Parameters<typeof client.chats.sendMessage>[0], 'chatId'>),
+        })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        const detail = res as unknown as { id?: string; role?: string }
+        process.stdout.write(
+          `${bullet(`sent → ${color.accent(detail.id ?? '?')} (${detail.role ?? '—'})`)}\n`,
+        )
+      }),
+    )
+
+  cmd
+    .command('resume <chat-id> <message-id>')
+    .description('Resume a stopped or in-progress message')
+    .action(
+      runCommand(async ({ client, mode, cmd, recordResult }) => {
+        const [chatId, messageId] = cmd.args as [string, string]
+        const res = await client.chats.resume({ chatId, messageId })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`resumed ${color.accent(messageId)}`)}\n`)
+      }),
+    )
+
+  cmd
+    .command('stop <chat-id> <message-id>')
+    .description('Stop message generation')
+    .action(
+      runCommand(async ({ client, mode, cmd, recordResult }) => {
+        const [chatId, messageId] = cmd.args as [string, string]
+        const res = await client.chats.stop({ chatId, messageId })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`stopped ${color.accent(messageId)}`)}\n`)
       }),
     )
 

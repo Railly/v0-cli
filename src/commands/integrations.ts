@@ -1,7 +1,8 @@
 import { Command } from 'commander'
-import { section, table } from '../lib/output/human.ts'
+import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
+import { color } from '../lib/ui/color.ts'
 
 export function integrationsCommand(): Command {
   const cmd = new Command('integrations').description('Third-party integrations (Vercel)')
@@ -21,6 +22,28 @@ export function integrationsCommand(): Command {
             { key: 'id', header: 'id' },
             { key: 'name', header: 'name' },
           ])}\n`,
+        )
+      }),
+    )
+
+  vercel
+    .command('link')
+    .description('Link a Vercel project to this v0 workspace (T1)')
+    .requiredOption('--vercel-project <id>', 'Vercel project id')
+    .option('--name <n>', 'display name')
+    .action(
+      runCommand(async ({ client, mode, cmd, recordResult }) => {
+        const raw = cmd.opts<{ vercelProject: string; name?: string }>()
+        const params = {
+          projectId: raw.vercelProject,
+          ...(raw.name ? { name: raw.name } : {}),
+        } as Parameters<typeof client.integrations.vercel.projects.create>[0]
+        const res = await client.integrations.vercel.projects.create(params)
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        const detail = res as unknown as { id?: string }
+        process.stdout.write(
+          `${bullet(`linked Vercel project → ${color.accent(detail.id ?? '?')}`)}\n`,
         )
       }),
     )

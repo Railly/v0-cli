@@ -1,13 +1,13 @@
+import { readFile } from 'node:fs/promises'
 import { Command } from 'commander'
-import { section, table } from '../lib/output/human.ts'
+import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { runCommand } from '../lib/runner.ts'
 import { color } from '../lib/ui/color.ts'
+import { mergeParams, parseParamsJson } from '../lib/validation/params.ts'
 
 export function versionCommand(): Command {
-  const cmd = new Command('version').description(
-    'Read v0 chat versions (list, show). Downloads land in V2.',
-  )
+  const cmd = new Command('version').description('v0 chat versions (list, show, update).')
 
   cmd
     .command('list <chat-id>')
@@ -56,5 +56,40 @@ export function versionCommand(): Command {
       }),
     )
 
+  cmd
+    .command('update <chat-id> <version-id>')
+    .description('Replace files in a version (T1). Pass --file <name>=<path> repeatably.')
+    .option('--file <entry...>', 'name=local-path pair (repeatable)', collect, [] as string[])
+    .option('--params <json>', 'raw JSON body')
+    .action(
+      runCommand(async ({ client, mode, cmd, recordResult }) => {
+        const [chatId, versionId] = cmd.args as [string, string]
+        const raw = cmd.opts<{ file?: string[]; params?: string }>()
+        const files: Array<{ name: string; content: string }> = []
+        for (const entry of raw.file ?? []) {
+          const [name, ...rest] = entry.split('=')
+          if (!name || !rest.length) continue
+          const filePath = rest.join('=')
+          const content = await readFile(filePath, 'utf8')
+          files.push({ name, content })
+        }
+        const sugar: Record<string, unknown> = {}
+        if (files.length) sugar.files = files
+        const body = mergeParams(sugar, parseParamsJson(raw.params))
+        const res = await client.chats.updateVersion({
+          chatId,
+          versionId,
+          ...(body as { files: Array<{ name: string; content: string }> }),
+        })
+        recordResult(res)
+        if (mode === 'json') return emitSuccess(res)
+        process.stdout.write(`${bullet(`updated version ${color.accent(versionId)}`)}\n`)
+      }),
+    )
+
   return cmd
+}
+
+function collect(value: string, prev: string[]): string[] {
+  return [...prev, value]
 }

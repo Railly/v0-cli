@@ -59,7 +59,16 @@ program.addCommand(schemaCommand())
 program.addCommand(auditCommand())
 program.addCommand(killswitchCommand())
 
-program.parseAsync(process.argv).catch((err) => {
+// Shorthand: `v0 "<message>"` → `v0 chat create <message>`.
+// Kicks in only when the first non-flag argument is not a registered command name.
+const knownCommands = new Set(program.commands.map((c) => c.name()))
+const argv = [...process.argv]
+const firstArgIdx = argv.findIndex((a, i) => i >= 2 && !a.startsWith('-'))
+if (firstArgIdx !== -1 && !knownCommands.has(argv[firstArgIdx] ?? '')) {
+  argv.splice(firstArgIdx, 0, 'chat', 'create')
+}
+
+program.parseAsync(argv).catch((err) => {
   process.stderr.write(`[fatal] ${err instanceof Error ? err.message : String(err)}\n`)
   process.exit(1)
 })

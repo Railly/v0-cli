@@ -38,6 +38,9 @@ export async function assertRateLimitOk(
   const snap = await getSnapshot(client, profile, opts.scope)
   if (opts.force) return snap
 
+  // Grace-period accounts are not actually rate-limited; skip the gate.
+  if (snap.dailyLimit?.isWithinGracePeriod) return snap
+
   const threshold = profile.rate_limits?.low_remaining_threshold ?? 50
   const blockOnJson = profile.rate_limits?.block_on_low_json ?? true
   const remaining = snap.dailyLimit?.remaining ?? snap.remaining
