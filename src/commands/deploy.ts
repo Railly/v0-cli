@@ -1,13 +1,19 @@
 import { Command } from 'commander'
 import { bullet, kv, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
+import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
 import { runCommand } from '../lib/runner.ts'
+import { renderSteps } from '../lib/streaming/step-renderer.ts'
 import { confirmOrAbort } from '../lib/trust/confirm.ts'
 import { requireIntent } from '../lib/trust/require-intent.ts'
 import { color } from '../lib/ui/color.ts'
 import { CliError } from '../lib/utils/errors.ts'
 import { readBatchItems, runBatch } from '../lib/workflows/batch.ts'
-import { buildDeployPreview, pollDeployment } from '../lib/workflows/deploy-and-wait.ts'
+import {
+  buildDeployPreview,
+  pollDeployment,
+  streamDeployment,
+} from '../lib/workflows/deploy-and-wait.ts'
 
 export function deployCommand(): Command {
   const cmd = new Command('deploy').description(
@@ -180,33 +186,56 @@ export function deployCommand(): Command {
         }
         const timeoutSec = Number(opts.waitTimeout ?? '600')
         const intervalSec = Number(raw.interval ?? '3')
+
+        if (mode === 'human') {
+          // Same UX as chat create / msg send: past-tense step transcript
+          // with a rolling `Thinking…` spinner, status transitions emerge
+          // as steps (Queued · 2s, Building · 45s, …), final summary lists
+          // deploy id + url.
+          //
+          // streamDeployment is an async-generator — it yields StepEvents
+          // for the renderer AND returns a PollResult when done. The
+          // renderer only consumes the yielded iterable, so we wrap it in
+          // a thin iterator that captures the return value for audit.
+          const stream = streamDeployment(client, { deploymentId, timeoutSec, intervalSec })
+          let pollResult: Awaited<ReturnType<typeof pollDeployment>> | undefined
+          const forRenderer = (async function* () {
+            while (true) {
+              const it = await stream.next()
+              if (it.done) {
+                pollResult = it.value
+                return
+              }
+              yield it.value
+            }
+          })()
+          const renderResult = await renderSteps(forRenderer, {
+            intro: 'v0 deploy create',
+            subtitle: `${chatId} · ${versionId}`,
+            idleLabel: 'Queued',
+          })
+          recordResult({
+            ...(deployment as unknown as Record<string, unknown>),
+            waitResult: pollResult,
+          })
+          if (renderResult.error) process.exit(1)
+          return
+        }
+
+        // JSON mode — keep the existing polling path so agents can pipe
+        // the NDJSON stream through jq.
         const result = await pollDeployment(client, {
           deploymentId,
           timeoutSec,
           intervalSec,
-          ndjson: mode === 'json',
+          ndjson: true,
         })
         recordResult({ ...(deployment as unknown as Record<string, unknown>), waitResult: result })
-
-        if (mode === 'json') {
-          return emitSuccess({
-            deployment: result.deployment,
-            reason: result.reason,
-            durationMs: result.durationMs,
-          })
-        }
-        const final = result.deployment as {
-          id?: string
-          status?: string
-          webUrl?: string
-          url?: string
-        }
-        process.stdout.write(`${section('deployment finished')}\n`)
-        process.stdout.write(`${kv('id', final.id ?? '—')}\n`)
-        process.stdout.write(`${kv('status', final.status ?? '—')}\n`)
-        if (final.webUrl) process.stdout.write(`${kv('url', final.webUrl)}\n`)
-        else if (final.url) process.stdout.write(`${kv('url', final.url)}\n`)
-        process.stdout.write(`${kv('reason', result.reason)}\n`)
+        return emitSuccess({
+          deployment: result.deployment,
+          reason: result.reason,
+          durationMs: result.durationMs,
+        })
       }),
     )
 
