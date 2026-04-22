@@ -63,6 +63,36 @@ Error:
 
 Output mode: `--json` is implied when stdout is not a TTY. In TTY, human-formatted output goes to stdout; warnings and confirm prompts go to stderr. `--fields <list>` trims top-level keys in JSON for context discipline.
 
+### Streaming NDJSON for long-running mutations
+
+`chat create` and `msg send` generate content on v0's side — they can take 30–120s on non-trivial prompts. The CLI routes by TTY:
+
+| Context | Default |
+|---|---|
+| Human TTY | Streaming clack render |
+| `--json` non-TTY (Claude Code, CI, pipes) | Streaming **NDJSON** |
+| `--json` in a real TTY (`v0 … \| jq`) | Blocking — single `{data: …}` envelope |
+
+The non-TTY stream exists because the SDK's HTTP client hits a ~60s timeout on blocking POSTs. Large prompts would fail with `client_error: The operation timed out` even though v0 kept generating on the server. Streaming keeps the connection alive.
+
+**Agent pattern for parsing the final result:**
+
+```bash
+# Each line is an NDJSON frame. The last meaningful frame is
+# {event:"envelope", data: <final chat snapshot>}.
+v0 chat create --message "$PROMPT" --json \
+  | jq -c 'select(.event=="envelope") | .data' \
+  | tee /tmp/chat.json
+
+CHAT=$(jq -r '.id' /tmp/chat.json)
+VER=$(jq -r '.latestVersion.id' /tmp/chat.json)
+FILES=$(jq '.files | length' /tmp/chat.json)
+```
+
+**Force blocking instead:** `--no-stream` restores the classic behavior (one final `{data: …}` envelope, no intermediate frames). Prefer this only when piping to `jq` interactively in a real terminal on short prompts.
+
+**Alternative for very long prompts:** `--background` returns a `chat_id` in <1s, then `chat wait` / `chat watch` reattach. See section 2b.
+
 ## Trust ladder
 
 | Level | Friction | Representative commands |
@@ -206,13 +236,24 @@ v0 chat create --message "Terminal dashboard with CRT scanlines" \
 v0 "Terminal dashboard with CRT scanlines"
 ```
 
-Streaming:
+Streaming (default in non-TTY `--json`):
 
 ```bash
+# Claude Code / CI / any pipe: NDJSON stream, final envelope at the end.
+v0 chat create --message "..." --json \
+  | jq -c 'select(.event=="envelope") | .data'
+# → { id, latestVersion: { id, files, … }, webUrl, privacy, … }
+
+# `--stream` forces streaming even in a real TTY (human mode still uses
+# the clack renderer; JSON mode emits the same NDJSON as non-TTY).
 v0 chat create --message "..." --stream --json
-# Emits one JSON event per line: {"event":"message","data":...,"ts":"..."}
-# Warning on stderr: SSE has no resume; a network flap requires re-sending.
+
+# `--no-stream` forces the classic blocking POST (single { data } envelope).
+# Safe only on short prompts — the SDK HTTP client times out at ~60s.
+v0 chat create --message "..." --no-stream --json
 ```
+
+SSE has no resume. If the pipe breaks mid-stream, re-issue the request (the chat is lost unless you used `--background`).
 
 ### 2b. Parallel chat creation (background)
 
