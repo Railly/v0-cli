@@ -75,13 +75,41 @@ program.addCommand(schemaCommand())
 program.addCommand(auditCommand())
 program.addCommand(killswitchCommand())
 
-// Shorthand: `v0 "<message>"` → `v0 chat create <message>`.
-// Kicks in only when the first non-flag argument is not a registered command name.
+// Shorthand router: turns a single positional arg into either
+//   `v0 chat init <source>`   when it looks like a path, URL, or template id
+//   `v0 chat create <prompt>` otherwise (the default — a free-form message)
+//
+// Kicks in only when the first non-flag argument is not a registered command.
 const knownCommands = new Set(program.commands.map((c) => c.name()))
 const argv = [...process.argv]
 const firstArgIdx = argv.findIndex((a, i) => i >= 2 && !a.startsWith('-'))
-if (firstArgIdx !== -1 && !knownCommands.has(argv[firstArgIdx] ?? '')) {
-  argv.splice(firstArgIdx, 0, 'chat', 'create')
+if (firstArgIdx !== -1) {
+  const firstArg = argv[firstArgIdx] ?? ''
+  if (!knownCommands.has(firstArg)) {
+    // Route to `chat init` when the arg is unambiguously a concrete source:
+    // a path (starts with ./, ../, ~/, /, or is . | ..), an http(s) URL,
+    // an SSH git remote, or a template id. Bare words like "dashboard" are
+    // prompts and go to `chat create`.
+    const isSourceLike =
+      firstArg === '.' ||
+      firstArg === '..' ||
+      firstArg.startsWith('./') ||
+      firstArg.startsWith('../') ||
+      firstArg.startsWith('~/') ||
+      firstArg.startsWith('/') ||
+      /^https?:\/\//i.test(firstArg) ||
+      /^git@[\w.-]+:/.test(firstArg) ||
+      /^(template_|tpl_)/i.test(firstArg)
+    // v0.app/templates/<slug>-<id> URLs are also init sources (templates).
+    // The detectSourceKind helper handles the extraction; here we just need
+    // to decide between init vs create. HTTP URLs already route to init
+    // through `isSourceLike`, so v0.app URLs are covered.
+    if (isSourceLike) {
+      argv.splice(firstArgIdx, 0, 'chat', 'init')
+    } else {
+      argv.splice(firstArgIdx, 0, 'chat', 'create')
+    }
+  }
 }
 
 program.parseAsync(argv).catch((err) => {

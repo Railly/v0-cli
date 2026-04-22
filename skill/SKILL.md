@@ -114,10 +114,34 @@ The token is not reusable across commands, not reusable across params, and not r
 
 `chat init` costs zero tokens (no AI generation) — prefer it over `chat create` whenever you already have source files. The CLI walks the source dir, respects `node_modules`/`.git`/`dist` exclusions, and caps at 3 MB per file and 1000 files total.
 
+`chat init` takes a single positional argument and auto-detects its kind:
+
+| Input shape | Inferred type |
+|---|---|
+| `.`, `./`, `../`, `~/`, `/abs/path`, bare dir | `files` |
+| `https://github.com/...`, `git@host:...`, ends in `.git` | `repo` |
+| URL ending in `.zip` | `zip` |
+| URL ending in `.json` (shadcn registry) | `registry` |
+| `template_<id>`, `tpl_<id>`, or a v0.app template URL | `template` |
+
+Override with `--type` if the heuristic guesses wrong (rare).
+
+Templates can't be listed from the API — the gallery lives at https://v0.app/templates. Grab a template URL from there and pass it directly:
+
 ```bash
-# T1 — init from a local directory
-CHAT=$(v0 chat init --type files --source ./my-template \
+v0 chat init https://v0.app/templates/optimus-the-ai-platform-to-build-and-ship-LHv4frpA7Us
+# Extracts the suffix after the last `-` as the templateId (LHv4frpA7Us here).
+```
+
+Or run `v0 chat init --list-templates` — it prints the gallery URL plus a copy-paste example.
+
+```bash
+# T1 — init from a local directory (positional, auto-detects 'files')
+CHAT=$(v0 chat init ./my-template \
   --project prj_xxx --name "Build" --json | jq -r '.data.id')
+
+# T1 — same thing, explicit form (accepted but more verbose)
+v0 chat init --type files --source ./my-template --json
 
 # T1 — iterate. Sync by default; --stream emits NDJSON frames.
 v0 msg send "$CHAT" --message "Add a sticky header" --json

@@ -2,6 +2,11 @@ import { Command } from 'commander'
 import { readSseStream } from '../lib/api/streaming.ts'
 import { attachBackgroundSubcommands } from './chat-background.ts'
 import { bullet, section, table } from '../lib/output/human.ts'
+import {
+  detectSourceKind,
+  extractTemplateIdFromUrl,
+  type SourceKind,
+} from '../lib/workflows/detect-source.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
 import { runCommand } from '../lib/runner.ts'
@@ -224,14 +229,14 @@ export function chatCommand(): Command {
     )
 
   cmd
-    .command('init')
+    .command('init [source]')
     .description(
-      'Init chat from existing source (files|repo|registry|zip|template). Zero token cost.',
+      "Init chat from a local dir, git URL, zip URL, registry URL, or templateId. Zero token cost. Use 'v0 chat init --list-templates' to open the template gallery.",
     )
-    .option('--type <t>', 'files|repo|registry|zip|template', 'files')
+    .option('--type <t>', 'force type: files|repo|registry|zip|template (default: auto-detect)')
     .option(
       '--source <path-or-url>',
-      'local dir/file (files), url (repo|registry|zip), or templateId',
+      '[legacy] same as positional arg; kept for backwards compatibility',
     )
     .option('--project <id>', 'project id')
     .option('--name <n>', 'chat name')
@@ -239,8 +244,10 @@ export function chatCommand(): Command {
     .option('--lock-all', 'lock all files to prevent AI overwrite')
     .option('--branch <name>', 'git branch (repo type only)')
     .option('--params <json>', 'raw JSON body, merged with sugar flags')
+    .option('--list-templates', 'open v0.app template gallery in the browser')
     .action(
-      runCommand(async ({ client, mode, cmd, recordResult }) => {
+      runCommand(async ({ mode, cmd, client, recordResult }) => {
+        const [positional] = cmd.args as [string | undefined]
         const raw = cmd.opts<{
           type?: string
           source?: string
@@ -250,18 +257,57 @@ export function chatCommand(): Command {
           lockAll?: boolean
           branch?: string
           params?: string
+          listTemplates?: boolean
         }>()
 
-        const type = (raw.type ?? 'files') as 'files' | 'repo' | 'registry' | 'zip' | 'template'
+        if (raw.listTemplates) {
+          const url = 'https://v0.app/templates'
+          if (mode === 'json') {
+            emitSuccess({ url })
+            return
+          }
+          process.stdout.write(
+            `${color.dim('Browse templates at:')} ${color.accent(url)}\n`,
+          )
+          process.stdout.write(
+            `${color.dim('Then pass the template URL to init, e.g.:')}\n`,
+          )
+          process.stdout.write(
+            `  ${color.muted('v0 chat init https://v0.app/templates/optimus-the-ai-platform-to-build-and-ship-LHv4frpA7Us')}\n`,
+          )
+          return
+        }
+
+        // Positional wins over the legacy --source flag; one of them is required
+        // (unless --params is provided).
+        const source = positional ?? raw.source
+        if (!source && !raw.params) {
+          throw new Error(
+            'chat init requires a source — pass a path, URL, or templateId as the first argument (or --params <json>)',
+          )
+        }
+
+        // Auto-detect from source shape. --type forces a specific kind when
+        // the heuristic would guess wrong (e.g. a self-hosted git URL that
+        // doesn't end in .git).
+        const type: SourceKind = raw.type
+          ? (raw.type as SourceKind)
+          : source
+            ? detectSourceKind(source)
+            : 'files'
+
+        if (mode === 'human' && source && !raw.type) {
+          process.stderr.write(
+            `${color.dim(`[detect]`)} ${color.muted(`${source} →`)} ${color.accent(type)}\n`,
+          )
+        }
+
         let sugar: Record<string, unknown> = {}
 
         if (type === 'files') {
-          if (!raw.source && !raw.params) {
-            throw new Error('chat init --type files requires --source <path> or --params')
-          }
-          if (raw.source) {
+          if (source) {
             const files = await readSource({
-              root: raw.source,
+              root: source,
               ...(raw.lockAll !== undefined ? { lockAll: raw.lockAll } : {}),
             })
             sugar = buildFilesInitBody({
@@ -272,42 +318,41 @@ export function chatCommand(): Command {
             })
           }
         } else if (type === 'repo') {
-          if (!raw.source && !raw.params)
-            throw new Error('chat init --type repo requires --source <git-url>')
-          if (raw.source) {
+          if (source) {
             sugar = {
               type: 'repo',
               repo: {
-                url: raw.source,
+                url: source,
                 ...(raw.branch ? { branch: raw.branch } : {}),
               },
               ...(raw.lockAll ? { lockAllFiles: true } : {}),
             }
           }
         } else if (type === 'registry') {
-          if (!raw.source && !raw.params)
-            throw new Error('chat init --type registry requires --source <url>')
-          if (raw.source) {
+          if (source) {
             sugar = {
               type: 'registry',
-              registry: { url: raw.source },
+              registry: { url: source },
               ...(raw.lockAll ? { lockAllFiles: true } : {}),
             }
           }
         } else if (type === 'zip') {
-          if (!raw.source && !raw.params)
-            throw new Error('chat init --type zip requires --source <url>')
-          if (raw.source) {
+          if (source) {
             sugar = {
               type: 'zip',
-              zip: { url: raw.source },
+              zip: { url: source },
               ...(raw.lockAll ? { lockAllFiles: true } : {}),
             }
           }
         } else if (type === 'template') {
-          if (!raw.source && !raw.params)
-            throw new Error('chat init --type template requires --source <templateId>')
-          if (raw.source) sugar = { type: 'template', templateId: raw.source }
+          if (source) {
+            // Accept either a raw template id (`template_abc` / `tpl_abc` /
+            // bare slug) or a v0.app template URL. Extract the id in either
+            // case so the API receives the canonical form.
+            const fromUrl = extractTemplateIdFromUrl(source)
+            const templateId = fromUrl ?? source
+            sugar = { type: 'template', templateId }
+          }
         }
 
         if (raw.name && !sugar.name) sugar.name = raw.name
