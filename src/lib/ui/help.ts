@@ -54,23 +54,48 @@ export function mountHelp(program: Command): void {
       }
 
       if (cmd === program) {
+        const example = (comment: string, cmdText: string): void => {
+          lines.push(`  ${color.muted('#')} ${color.dim(comment)}`)
+          lines.push(`  ${color.accent('v0')} ${color.info(cmdText)}`)
+          lines.push('')
+        }
+
         lines.push('')
         lines.push(`${color.bold('EXAMPLES')}`)
-        lines.push(`  ${color.muted('#')} ${color.dim('one-liner: create a chat')}`)
         lines.push(
-          `  ${color.accent('v0')} ${color.info('"Build a terminal dashboard with CRT scanlines"')}`,
+          `  ${color.dim('Shorthand: v0 <arg> routes by shape — path/URL/template → chat init, else chat create.')}`,
         )
         lines.push('')
-        lines.push(`  ${color.muted('#')} ${color.dim('check account state')}`)
-        lines.push(`  ${color.accent('v0')} ${color.info('auth whoami --json')}`)
+
+        example('prompt → chat create', '"landing page with hero and pricing"')
+        example('local dir → chat init (files, zero tokens)', './my-project')
+        example('cwd → chat init (files)', '.')
+        example(
+          'github repo → chat init (repo)',
+          'https://github.com/vercel/next.js',
+        )
+        example(
+          'v0 template URL → chat init (template, extracts id)',
+          'https://v0.app/templates/optimus-...-LHv4frpA7Us',
+        )
+        example('bare template id → chat init (template)', 'template_abc123')
+        example('zip archive → chat init (zip)', 'https://example.com/dist.zip')
+        example(
+          'shadcn registry → chat init (registry)',
+          'https://ui.shadcn.com/registry/button.json',
+        )
+
+        lines.push(`  ${color.dim('Core workflow:')}`)
         lines.push('')
-        lines.push(`  ${color.muted('#')} ${color.dim('rate-limit preflight')}`)
-        lines.push(`  ${color.accent('v0')} ${color.info('rate-limits --json')}`)
-        lines.push('')
-        lines.push(`  ${color.muted('#')} ${color.dim('introspect an endpoint')}`)
-        lines.push(`  ${color.accent('v0')} ${color.info('schema chats.init')}`)
-        lines.push('')
-        lines.push(color.dim('Docs: https://github.com/Railly/v0-cli'))
+        example('preflight health check', 'doctor')
+        example('check account + plan + rate limits', 'auth whoami --json')
+        example('iterate on an existing chat', 'msg send <chat-id> "add dark mode"')
+        example('download a version as a zip', 'version download <chat> <ver>')
+        example('ship a deployment', 'deploy create <chat> <ver> --yes --wait')
+        example('parallel: fire 3 chats, collect later', '"hero" --background --json')
+        example('introspect any of the 55 operations', 'schema chats.init')
+
+        lines.push(color.dim('Docs: https://v0-cli.crafter.run/docs'))
       }
 
       return `${lines.join('\n')}\n`
