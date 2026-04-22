@@ -52,15 +52,15 @@ export function auditCommand(): Command {
         process.stdout.write(`${section(`audit (${entries.length})`)}\n`)
         for (const e of entries) {
           const stateColor =
-            e.status === 'ok'
+            e.result === 'ok'
               ? color.success
-              : e.status === 'error'
+              : e.result === 'error'
                 ? color.error
-                : e.status === 'pending'
+                : e.result === 'blocked'
                   ? color.warn
                   : color.muted
           process.stdout.write(
-            `  ${color.dim(e.ts)} ${stateColor(e.status.padEnd(7))} ${color.accent(e.trustLevel)} ${e.cmd}\n`,
+            `  ${color.dim(e.ts)} ${stateColor(e.result.padEnd(7))} ${color.accent(e.tier ?? '--')} ${e.command}\n`,
           )
         }
       },

@@ -1,41 +1,45 @@
-import { stat, unlink, writeFile } from 'node:fs/promises'
-import { CliError } from '../utils/errors.ts'
-import { ensureConfigDir, killswitchPath } from '../utils/path.ts'
+// Thin wrapper around cligentic/safety/killswitch. All callers use this
+// module so we can map cligentic's generic Error into our CliError + exit 4.
 
-export async function killswitchStatus(): Promise<boolean> {
-  try {
-    await stat(killswitchPath())
-    return true
-  } catch {
-    return false
-  }
+import {
+  assertKillswitchOff as cligenticAssert,
+  turnKillswitchOff as cligenticOff,
+  turnKillswitchOn as cligenticOn,
+  getKillswitchState,
+  isKillswitchOn,
+} from '../../cli/safety/killswitch.ts'
+import { CliError } from '../utils/errors.ts'
+import { paths } from '../utils/path.ts'
+
+function appHome(): string {
+  return paths().state
 }
 
-export async function killswitchOn(): Promise<void> {
-  await ensureConfigDir()
-  await writeFile(
-    killswitchPath(),
-    JSON.stringify({ engagedAt: new Date().toISOString() }, null, 2),
-    { mode: 0o600 },
-  )
+export async function killswitchStatus(): Promise<boolean> {
+  return isKillswitchOn(appHome())
+}
+
+export async function killswitchOn(reason = 'manual'): Promise<void> {
+  cligenticOn(appHome(), reason)
 }
 
 export async function killswitchOff(): Promise<void> {
-  try {
-    await unlink(killswitchPath())
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-  }
+  cligenticOff(appHome())
 }
 
 export async function assertKillswitchOff(context: string): Promise<void> {
-  if (await killswitchStatus()) {
+  try {
+    cligenticAssert(appHome())
+  } catch (err) {
+    const state = getKillswitchState(appHome())
     throw new CliError(
       {
         code: 'killswitch_engaged',
         type: 'killswitch',
         message: 'Killswitch is ON',
-        userMessage: `Killswitch is engaged; ${context} blocked. Run \`v0 killswitch off\` to release.`,
+        userMessage: `Killswitch is engaged; ${context} blocked${
+          state.reason ? ` (${state.reason})` : ''
+        }. Run \`v0 killswitch off\` to release.`,
       },
       4,
     )

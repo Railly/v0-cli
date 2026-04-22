@@ -13,11 +13,11 @@ let tempDir: string
 
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'v0cli-'))
-  process.env.V0_CLI_CONFIG_DIR = tempDir
+  process.env.V0CLI_HOME = tempDir
 })
 
 afterEach(() => {
-  delete process.env.V0_CLI_CONFIG_DIR
+  delete process.env.V0CLI_HOME
   rmSync(tempDir, { recursive: true, force: true })
 })
 

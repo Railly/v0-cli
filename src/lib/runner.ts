@@ -60,7 +60,7 @@ export function runCommand(fn: RunFn): (...args: unknown[]) => Promise<void> {
     const trust = classifyCommand(commandPath)
 
     const audit = await auditStart({
-      cmd: `v0 ${commandPath.join(' ')}`,
+      command: `v0 ${commandPath.join(' ')}`,
       trustLevel: trust,
       profile: profileName,
       apiKeyPrefix: apiKeyPrefix(resolveApiKey(profile, opts.apiKey)),
