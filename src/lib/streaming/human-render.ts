@@ -41,12 +41,12 @@ function fmtElapsed(ms: number): string {
  */
 export async function renderHumanStream(
   stream: AsyncIterable<StreamFrame>,
-  opts: { prompt?: string } = {},
+  opts: { prompt?: string; title?: string } = {},
 ): Promise<RenderResult> {
   const startedAt = Date.now()
   const result: RenderResult = { files: [], raw: [] }
 
-  p.intro(color.bold('v0 chat create'))
+  p.intro(color.bold(opts.title ?? 'v0 chat create'))
   if (opts.prompt) {
     const short = opts.prompt.length > 72 ? `${opts.prompt.slice(0, 69)}…` : opts.prompt
     p.log.message(color.dim(short))
