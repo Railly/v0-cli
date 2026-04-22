@@ -102,29 +102,6 @@ const TERMINAL_STATUSES = new Set([
   'canceled',
 ])
 
-// Canonical mapping from raw Vercel/v0 deployment status strings to the
-// past-tense label the human renderer surfaces. Unknown statuses fall
-// through — they'll show as idle labels so the transcript stays clean.
-const STATUS_MAP: Record<string, { active: string; complete: string }> = {
-  queued: { active: 'Queueing', complete: 'Queued' },
-  QUEUED: { active: 'Queueing', complete: 'Queued' },
-  initializing: { active: 'Initializing', complete: 'Initialized' },
-  INITIALIZING: { active: 'Initializing', complete: 'Initialized' },
-  building: { active: 'Building', complete: 'Built' },
-  BUILDING: { active: 'Building', complete: 'Built' },
-  uploading: { active: 'Uploading', complete: 'Uploaded' },
-  UPLOADING: { active: 'Uploading', complete: 'Uploaded' },
-  deploying: { active: 'Deploying', complete: 'Deployed' },
-  DEPLOYING: { active: 'Deploying', complete: 'Deployed' },
-}
-
-function statusToLabels(
-  raw: string | undefined,
-): { active: string; complete: string } | null {
-  if (!raw) return null
-  return STATUS_MAP[raw] ?? STATUS_MAP[raw.toLowerCase()] ?? null
-}
-
 /**
  * Async-generator variant of `pollDeployment`. Yields `StepEvent`s that the
  * generic step-renderer can consume so `deploy create --wait` feels like the
@@ -147,33 +124,83 @@ export async function* streamDeployment(
   const intervalMs = (opts.intervalSec ?? 3) * 1000
   const deadline = Date.now() + opts.timeoutSec * 1000
   let lastLogTs = 0
-  let lastStatus: string | undefined
   let deployment: Record<string, unknown> = {}
 
-  while (Date.now() < deadline) {
+  // Prime: fetch once so we have the webUrl + inspectorUrl for probing.
+  // v0's DeploymentDetail doesn't expose a status field, so we rely on
+  // HTTP probes against the webUrl to decide 'terminal' instead.
+  try {
     const current = await client.deployments.getById({ deploymentId: opts.deploymentId })
     deployment = current as unknown as Record<string, unknown>
-    const status = deployment.status as string | undefined
+  } catch {
+    // retry inside the loop
+  }
 
-    // On status change, close the previous step with its past-tense label
-    // and switch the idle label to the new status's present-continuous form.
-    if (status !== lastStatus) {
-      const prev = statusToLabels(lastStatus)
-      if (prev) {
-        yield { kind: 'step', label: prev.complete }
+  const webUrl = (deployment.webUrl as string) || (deployment.url as string) || ''
+  const inspectorUrl = (deployment.inspectorUrl as string) || ''
+
+  // Emit an initial idle so the spinner has a label immediately instead
+  // of rendering blank for the first few seconds.
+  yield { kind: 'idle', label: 'Queued' }
+
+  // Heuristic phase detection from log messages. v0's deployment API
+  // doesn't expose status, so we infer steps from what the build logs say.
+  const seenPhases = new Set<string>()
+  const phasePatterns: Array<{ re: RegExp; complete: string; nextIdle: string }> = [
+    { re: /initializ/i, complete: 'Initialized', nextIdle: 'Installing' },
+    { re: /install/i, complete: 'Installed deps', nextIdle: 'Building' },
+    { re: /compil/i, complete: 'Compiled', nextIdle: 'Building' },
+    { re: /build.*(complete|success|passed)|next build/i, complete: 'Built', nextIdle: 'Uploading' },
+    { re: /uploading|pushing/i, complete: 'Uploaded', nextIdle: 'Deploying' },
+  ]
+
+  while (Date.now() < deadline) {
+    // Probe the webUrl. 200/3xx = live, 5xx = build error, 4xx/timeout
+    // = still building. This is our real 'is it ready' signal.
+    if (webUrl) {
+      let probeStatus = 0
+      try {
+        const res = await fetch(webUrl, { method: 'HEAD', redirect: 'follow' })
+        probeStatus = res.status
+      } catch {
+        // Network/DNS not ready yet — expected while deploy is queued
       }
-      const next = statusToLabels(status)
-      if (next) {
-        yield { kind: 'idle', label: next.active }
-      } else if (status) {
-        // Unknown status — still surface the raw label so the user isn't lost.
-        yield { kind: 'idle', label: String(status) }
+
+      if (probeStatus >= 200 && probeStatus < 400) {
+        yield { kind: 'step', label: 'Deployed' }
+        if (typeof deployment.id === 'string') {
+          yield { kind: 'meta', key: 'deploy', value: deployment.id }
+        }
+        yield { kind: 'meta', key: 'url', value: webUrl, accent: true }
+        if (inspectorUrl) {
+          yield { kind: 'meta', key: 'inspector', value: inspectorUrl, accent: true }
+        }
+        yield { kind: 'done' }
+        const result: PollResult = {
+          deployment,
+          durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
+          reason: 'terminal',
+        }
+        if (lastLogTs) result.lastLogTs = lastLogTs
+        return result
       }
-      lastStatus = status
+
+      if (probeStatus >= 500) {
+        yield {
+          kind: 'error',
+          message: `Deployment URL returned HTTP ${probeStatus}. Check ${inspectorUrl || webUrl} for details.`,
+        }
+        const result: PollResult = {
+          deployment,
+          durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
+          reason: 'terminal',
+        }
+        if (lastLogTs) result.lastLogTs = lastLogTs
+        return result
+      }
     }
 
-    // Tail logs (kept from original implementation) so JSON mode stays
-    // informative for agents piping through jq.
+    // Tail logs + derive phase transitions from message content.
     try {
       const logs = (await client.deployments.findLogs({
         deploymentId: opts.deploymentId,
@@ -184,59 +211,19 @@ export async function* streamDeployment(
         : (logs.data ?? [])
       for (const entry of entries) {
         if (entry.timestamp && entry.timestamp > lastLogTs) lastLogTs = entry.timestamp
+        const msg = entry.message ?? ''
+        for (const phase of phasePatterns) {
+          if (seenPhases.has(phase.complete)) continue
+          if (phase.re.test(msg)) {
+            seenPhases.add(phase.complete)
+            yield { kind: 'step', label: phase.complete }
+            yield { kind: 'idle', label: phase.nextIdle }
+            break
+          }
+        }
       }
     } catch {
       // logs can fail while queued — ignore
-    }
-
-    if (TERMINAL_STATUSES.has(status ?? '') || TERMINAL_STATUSES.has((status ?? '').toLowerCase())) {
-      // Close out the last active step with its past-tense form if we had one.
-      const last = statusToLabels(lastStatus)
-      if (last && !TERMINAL_STATUSES.has(lastStatus ?? '')) {
-        yield { kind: 'step', label: last.complete }
-      }
-
-      const lowered = (status ?? '').toLowerCase()
-      const isError = lowered.includes('error') || lowered === 'cancelled' || lowered === 'canceled'
-
-      // Surface metadata (id, url, final status) in the summary.
-      if (typeof deployment.id === 'string') {
-        yield { kind: 'meta', key: 'deploy', value: deployment.id }
-      }
-      if (typeof deployment.url === 'string') {
-        yield { kind: 'meta', key: 'url', value: deployment.url, accent: true }
-      }
-      if (typeof deployment.readyState === 'string' && !deployment.status) {
-        yield { kind: 'meta', key: 'status', value: deployment.readyState }
-      } else if (status) {
-        yield { kind: 'meta', key: 'status', value: status }
-      }
-
-      const result: PollResult = {
-        deployment,
-        durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
-        reason: 'terminal',
-      }
-      if (lastLogTs) result.lastLogTs = lastLogTs
-
-      if (isError) {
-        // Try to pull the first error message for the error event body.
-        let errMsg = `Deployment ${lowered}`
-        try {
-          const errors = (await client.deployments.findErrors({
-            deploymentId: opts.deploymentId,
-          })) as unknown as { data?: Array<{ message?: string }> } | Array<{ message?: string }>
-          const list = Array.isArray(errors) ? errors : (errors.data ?? [])
-          const first = list[0]
-          if (first?.message) errMsg = first.message
-        } catch {
-          // keep default
-        }
-        yield { kind: 'error', message: errMsg }
-      } else {
-        yield { kind: 'done' }
-      }
-      return result
     }
 
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
