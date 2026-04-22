@@ -4,6 +4,7 @@ import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
 import { runCommand } from '../lib/runner.ts'
+import { renderHumanStream } from '../lib/streaming/human-render.ts'
 import { confirmOrAbort } from '../lib/trust/confirm.ts'
 import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson, validateBody } from '../lib/validation/params.ts'
@@ -73,7 +74,7 @@ export function chatCommand(): Command {
   cmd
     .command('create [message...]')
     .description(
-      'Create a new chat from a prompt (T1). Pass --stream for SSE, --params for full body.',
+      'Create a new chat from a prompt (T1). Human mode streams by default; --json blocks unless --stream.',
     )
     .option('--message <msg>', 'user prompt (alternative to positional)')
     .option('--system <msg>', 'system prompt')
@@ -81,7 +82,8 @@ export function chatCommand(): Command {
     .option('--privacy <p>', 'public|private|team|team-edit|unlisted')
     .option('--model <id>', 'modelConfiguration.modelId (default: v0-auto)')
     .option('--thinking', 'enable modelConfiguration.thinking')
-    .option('--stream', 'use experimental_stream (SSE → NDJSON on stdout)')
+    .option('--stream', 'force SSE streaming (human render or --json NDJSON)')
+    .option('--no-stream', 'disable streaming, block until the chat returns')
     .option('--params <json>', 'raw JSON body, merged with sugar flags (--params wins on conflict)')
     .action(
       runCommand(async ({ client, mode, profile, cmd, recordResult }) => {
@@ -123,16 +125,29 @@ export function chatCommand(): Command {
 
         await validateBody({ operationId: 'chats.create', body })
 
-        if (raw.stream) {
-          if (mode === 'human') {
-            process.stderr.write(
-              `${color.warn('[stream]')} SSE has no resume; a network flap requires re-sending the message.\n`,
-            )
-          }
+        // Default: stream in human mode, block in json mode. --stream/--no-stream overrides.
+        const wantStream = raw.stream === true || (raw.stream !== false && mode === 'human')
+
+        if (wantStream) {
           const stream = (await client.chats.create({
             ...(body as unknown as Parameters<typeof client.chats.create>[0]),
             responseMode: 'experimental_stream',
           })) as unknown as ReadableStream<Uint8Array>
+
+          if (mode === 'human') {
+            const result = await renderHumanStream(readSseStream(stream), { prompt: message })
+            recordResult({
+              streamed: true,
+              chatId: result.chatId,
+              versionId: result.versionId,
+              files: result.files.length,
+              webUrl: result.webUrl,
+            })
+            if (result.error) process.exit(1)
+            return
+          }
+
+          // --json --stream: emit each frame as NDJSON on stdout
           let lastFrame: unknown = null
           for await (const frame of readSseStream(stream)) {
             lastFrame = frame.data
