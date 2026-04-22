@@ -97,6 +97,8 @@ export function mountHelp(program: Command): void {
         )
         example('parallel: fire 3 chats, collect later', '"hero" --background --json')
         example('introspect any of the 55 operations', 'schema chats.init')
+        example('install or refresh the agent skill', 'skill install')
+        example('check if your skill is up to date', 'skill status')
 
         lines.push(color.dim('Docs: https://v0-cli.crafter.run/docs'))
       }

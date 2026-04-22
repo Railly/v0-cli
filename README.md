@@ -41,6 +41,12 @@ Run `v0 --help` for the full table.
 For agents (Claude Code, Cursor, custom):
 
 ```bash
+v0 skill install       # self-contained, audit-logged
+v0 skill status        # check if your local copy is current
+v0 skill update        # pull the latest (idempotent)
+v0 skill uninstall     # remove
+
+# Or directly:
 npx skills add Railly/v0-cli
 ```
 

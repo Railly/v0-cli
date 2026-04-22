@@ -387,6 +387,21 @@ v0 doctor --json
 
 Requires Bun 1.3+. A Node-compatible build (`bun build --target=node`) is published in the same repo for environments without Bun.
 
+## Managing this skill
+
+Once v0-cli is on your PATH, the skill itself is a first-class citizen:
+
+```bash
+v0 skill install     # installs the latest SKILL.md into ~/.claude/skills/v0-cli
+v0 skill status      # local vs main SHA; tells you if stale
+v0 skill update      # re-pull (idempotent — same as install)
+v0 skill uninstall   # remove the installed directory
+```
+
+All four are T0 (read-only against v0's API; only touch local filesystem).
+Delegates to `npx -y skills add Railly/v0-cli` under the hood. Override the
+command with `--command` if you use a different installer.
+
 ## References
 
 - v0 Platform API docs: https://v0.app/docs/api/platform
