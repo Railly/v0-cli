@@ -46,9 +46,12 @@ export async function renderHumanStream(
 
   // Title: prefer `chat.title` stream over `chat.name` (they usually carry the
   // same value but v0 emits both, so we replace — never concat). Titles arrive
-  // as full replacement deltas in practice.
+  // as full replacement deltas in practice. We print the title ONCE the first
+  // time it stabilizes and keep it out of the spinner label — otherwise every
+  // re-render tattoos the title into the transcript on each update.
   let titleValue = ''
   let titleSource: 'title' | 'name' | '' = ''
+  let titlePrinted = false
 
   // Current active label. Reset when task-complete arrives.
   let currentTask = ''
@@ -59,17 +62,28 @@ export async function renderHumanStream(
   const completedSteps: string[] = []
   const completedSet = new Set<string>()
 
+  // Track the last task the renderer showed as active. v0 re-emits
+  // completes repeatedly; between those the currentTask is cleared but the
+  // next active frame is often the same label. We keep showing the last
+  // known label while we wait for the next task to start so the spinner
+  // never flashes "Thinking…" back mid-run.
+  let lastShown = ''
+
   const setLabel = () => {
     const elapsed = fmtElapsed(Date.now() - startedAt)
-    const parts: string[] = []
-    if (titleValue) parts.push(color.bold(titleValue))
-    if (currentTask) {
-      parts.push(color.dim(currentTask))
-    } else if (completedSteps.length > 0) {
-      parts.push(color.dim(`${completedSteps.length} steps`))
+    const label = currentTask || lastShown || 'Thinking…'
+    spin.message(`${color.bold(label)} ${color.dim(`· ${elapsed}`)}`)
+  }
+
+  const maybePrintTitle = () => {
+    if (titlePrinted || !titleValue) return
+    // Only print once we're confident the title is stable — either we got
+    // a chat.title frame (authoritative), or we've buffered a chat.name long
+    // enough that the first step started.
+    if (titleSource === 'title' || completedSteps.length > 0) {
+      p.log.info(color.bold(titleValue))
+      titlePrinted = true
     }
-    parts.push(color.dim(`· ${elapsed}`))
-    spin.message(parts.join(' '))
   }
 
   // Live elapsed timer — refresh even when no frames are arriving.
@@ -79,7 +93,10 @@ export async function renderHumanStream(
     if (completedSet.has(label)) return
     completedSet.add(label)
     completedSteps.push(label)
-    // Print above the spinner so the final transcript shows the step trail.
+    // Print the title the moment the first step completes if we haven't yet,
+    // so the transcript reads: [title] → step → step → … → summary.
+    maybePrintTitle()
+    // Print the step itself above the spinner so the trail survives.
     p.log.step(color.dim(label))
   }
 
@@ -102,14 +119,19 @@ export async function renderHumanStream(
               titleValue = phase.title
               titleSource = 'name'
             }
+            maybePrintTitle()
             setLabel()
             break
           case 'task-active':
             currentTask = phase.label
+            lastShown = phase.label
             setLabel()
             break
           case 'task-complete':
             pushStepIfNew(phase.label)
+            // Keep the last label on screen until the next active comes in,
+            // otherwise the spinner flashes 'Thinking…' every time a task
+            // completes before the next one starts.
             currentTask = ''
             setLabel()
             break
@@ -145,8 +167,10 @@ export async function renderHumanStream(
     `${color.success('✓')} Generated in ${color.bold(elapsed)} ${color.dim(`(${completedSteps.length} step${completedSteps.length === 1 ? '' : 's'})`)}`,
   )
 
-  if (result.title) {
-    p.log.step(color.bold(result.title))
+  // Emit title here only if we never got around to printing it (e.g. no
+  // steps arrived — pathological but possible).
+  if (!titlePrinted && result.title) {
+    p.log.info(color.bold(result.title))
   }
   const rows: string[] = []
   if (result.chatId) rows.push(`${color.muted('chat    ')} ${result.chatId}`)
