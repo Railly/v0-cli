@@ -180,21 +180,24 @@ export function skillCommand(): Command {
 
   cmd
     .command('update')
-    .description('Re-run the installer to pick up the latest skill version. T0.')
+    .description(
+      'Update the skill to the latest version via `npx skills update`. T0.',
+    )
     .option(
       '--command <args...>',
-      'override installer command (default: npx -y skills add Railly/v0-cli)',
+      'override installer command (default: npx -y skills update v0-cli)',
     )
     .action(
       runCommand(async ({ mode, cmd, recordResult }) => {
         const raw = cmd.opts<{ command?: string[] }>()
-        // `skills add` is idempotent — it overwrites the local copy with the
-        // remote version. So "update" is just another install. Separate verb
-        // for discoverability.
+        // The `skills` CLI exposes `update` as a first-class verb (alias
+        // `upgrade`) distinct from `add`. It takes the skill NAME (not the
+        // slug) — skills installed via `add Railly/v0-cli` live under the
+        // folder name `v0-cli`. So the update target is the bare name.
         const args =
           raw.command && raw.command.length > 0
             ? raw.command
-            : ['npx', '-y', 'skills', 'add', SKILL_SLUG]
+            : ['npx', '-y', 'skills', 'update', 'v0-cli', '-y']
         if (mode === 'human') {
           process.stdout.write(
             `${color.dim('Updating v0-cli skill via:')} ${color.accent(args.join(' '))}\n\n`,
