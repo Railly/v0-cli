@@ -2,7 +2,7 @@
 
 Agent-first CLI for the [v0 Platform API](https://v0.app/docs/api/platform).
 
-Single `v0` binary. 55 operations across chats, projects, versions, messages, deployments, env vars, webhooks, MCP servers. Stable JSON output, trust ladder, audit trail, single-use intent tokens for destructive ops.
+Single `v0` binary covering the entire Platform API. Stable JSON output, trust ladder, audit trail, single-use intent tokens for destructive ops.
 
 ```bash
 bun install -g @crafter/v0-cli   # or `bun link` from source
@@ -10,6 +10,31 @@ v0 doctor --json
 ```
 
 Requires `V0_API_KEY` from [v0.app/chat/settings/keys](https://v0.app/chat/settings/keys).
+
+## Shorthand
+
+`v0 <arg>` routes by the shape of the arg — no `chat create` / `chat init` ceremony:
+
+```bash
+v0 "landing page with hero and pricing"              # → chat create (prompt)
+v0 .                                                 # → chat init (cwd)
+v0 ./my-project                                      # → chat init (files)
+v0 https://github.com/vercel/next.js                 # → chat init (repo)
+v0 https://v0.app/templates/<slug>-<id>              # → chat init (template)
+v0 template_abc                                      # → chat init (template id)
+v0 https://example.com/dist.zip                      # → chat init (zip)
+```
+
+Core workflow:
+
+```bash
+v0 msg send <chat-id> "swap the hero copy"           # iterate (streams live)
+v0 version download <chat> <ver> --out ./build.zip   # pull the archive
+v0 deploy create <chat> <ver> --yes --wait           # ship + live transcript
+v0 "hero" --background --json                        # fire-and-forget for agents
+```
+
+Run `v0 --help` for the full table.
 
 ## Skill
 

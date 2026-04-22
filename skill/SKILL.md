@@ -110,6 +110,23 @@ The token is not reusable across commands, not reusable across params, and not r
 
 ## Canonical workflows
 
+### 0. Shorthand router (one-arg form)
+
+`v0 <arg>` picks the right verb based on the shape of the argument. Both agents and humans can use this; the expanded form (`v0 chat init …`, `v0 chat create …`) is still accepted and shows up cleaner in `v0 audit tail`.
+
+| Argument shape | Routes to | Notes |
+|---|---|---|
+| `v0 .` | `chat init` (files) | Current directory |
+| `v0 ./path` or `v0 ~/path` or `v0 /abs/path` | `chat init` (files) | Local source |
+| `v0 https://github.com/user/repo` | `chat init` (repo) | Also gitlab.com, bitbucket.org, SSH `git@host:` remotes, anything ending in `.git` |
+| `v0 https://example.com/dist.zip` | `chat init` (zip) | URL ending in `.zip` |
+| `v0 https://ui.shadcn.com/registry/button.json` | `chat init` (registry) | URL ending in `.json` |
+| `v0 https://v0.app/templates/<slug>-<id>` | `chat init` (template) | Id extracted as the segment after the last `-` |
+| `v0 template_abc` or `v0 tpl_abc` | `chat init` (template) | Bare template id |
+| `v0 "free-form prompt"` | `chat create` (message) | Anything that isn't a recognized source shape falls here |
+
+Bare words without a path/URL shape ("dashboard", "hero-section") go to `chat create` — they're prompts, not sources.
+
 ### 1. Init a chat from existing files, iterate, deploy
 
 `chat init` costs zero tokens (no AI generation) — prefer it over `chat create` whenever you already have source files. The CLI walks the source dir, respects `node_modules`/`.git`/`dist` exclusions, and caps at 3 MB per file and 1000 files total.
@@ -149,10 +166,15 @@ v0 msg send "$CHAT" --message "Add a sticky header" --json
 # Resolve newest version (T0)
 VER=$(v0 version list "$CHAT" --limit 1 --json | jq -r '.data.data[0].id')
 
+# T0 — download the version as a zip for local inspection
+v0 version download "$CHAT" "$VER" --out ./build.zip --json
+
 # T2 — preview deploy without side effect
 v0 deploy create "$CHAT" "$VER" --dry-run --json
 
 # T2 — ship. --yes is required in non-TTY; --wait polls until terminal status.
+# --wait in human mode streams status transitions as past-tense steps
+# (Queued · 2s, Built · 45s, Deployed · 12s, …). --json emits NDJSON.
 v0 deploy create "$CHAT" "$VER" --yes --wait --json
 ```
 
@@ -165,9 +187,8 @@ v0 deploy create "$CHAT" "$VER" --yes --wait --json
 v0 chat create --message "Terminal dashboard with CRT scanlines" \
   --project prj_xxx --privacy private --json
 
-# Shorthand: any first non-flag argument that is NOT a known noun is treated as
-# chat create --message. Ergonomic for humans, fine for agents, but the explicit
-# form shows up cleaner in `v0 audit tail`.
+# Shorthand form — see the router table in section 0 above.
+# Prompts go to chat create; paths/URLs/template ids go to chat init.
 v0 "Terminal dashboard with CRT scanlines"
 ```
 
