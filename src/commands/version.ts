@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
+import { isAbsolute, resolve } from 'node:path'
 import { Command } from 'commander'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
@@ -89,6 +90,45 @@ export function versionCommand(): Command {
     )
 
   cmd
+    .command('download <chat-id> <version-id>')
+    .description('Download a version as a zip/tarball archive (T0).')
+    .option('--out <path>', 'output file path (default: ./<versionId>.<format>)')
+    .option('--format <fmt>', 'zip | tarball', 'zip')
+    .option('--include-default-files', 'bundle scaffolding files too')
+    .action(
+      runCommand(async ({ client, mode, cmd, recordResult }) => {
+        const [chatId, versionId] = cmd.args as [string, string]
+        const raw = cmd.opts<{
+          out?: string
+          format?: string
+          includeDefaultFiles?: boolean
+        }>()
+        const format = (raw.format === 'tarball' ? 'tarball' : 'zip') as 'zip' | 'tarball'
+        const ext = format === 'tarball' ? 'tar.gz' : 'zip'
+        const outPath = raw.out
+          ? isAbsolute(raw.out)
+            ? raw.out
+            : resolve(process.cwd(), raw.out)
+          : resolve(process.cwd(), `${versionId}.${ext}`)
+        const buf = (await client.chats.downloadVersion({
+          chatId,
+          versionId,
+          format,
+          ...(raw.includeDefaultFiles ? { includeDefaultFiles: true } : {}),
+        })) as ArrayBuffer
+        await writeFile(outPath, Buffer.from(buf))
+        const bytes = buf.byteLength
+        recordResult({ path: outPath, bytes, format })
+        if (mode === 'json') {
+          return emitSuccess({ path: outPath, bytes, format })
+        }
+        process.stdout.write(
+          `${bullet(`saved ${color.accent(outPath)} ${color.dim(`(${formatBytes(bytes)}, ${format})`)}`)}\n`,
+        )
+      }),
+    )
+
+  cmd
     .command('files-delete <chat-id> <version-id>')
     .description('Delete files from a version (T2 — interactive confirm in TTY, --yes for agents).')
     .requiredOption('--paths <list>', 'comma-separated file paths to delete')
@@ -126,4 +166,10 @@ export function versionCommand(): Command {
 
 function collect(value: string, prev: string[]): string[] {
   return [...prev, value]
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`
 }

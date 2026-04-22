@@ -26,6 +26,7 @@ const TRUST_MAP: Record<string, TrustLevel> = {
   'msg show': 'T0',
   'version list': 'T0',
   'version show': 'T0',
+  'version download': 'T0',
   'deploy list': 'T0',
   'deploy show': 'T0',
   'deploy logs': 'T0',
