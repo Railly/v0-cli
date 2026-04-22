@@ -60,28 +60,23 @@ export async function renderHumanStream(
     if (titlePrinted || !titleValue) return
     p.log.info(color.bold(titleValue))
     titlePrinted = true
+    startSpinner()
   }
 
   const seenComplete = new Set<string>()
   let stepCount = 0
   let lastStepAt = Date.now()
 
-  // Single rolling spinner. Starts as "Thinking…", reopens after every step.
-  let spin = p.spinner()
-  spin.start(`${color.dim('Thinking…')} ${color.dim('· 0s')}`)
-  let tick: ReturnType<typeof setInterval> = setInterval(() => {
-    if (!spin) return
-    spin.message(`${color.dim('Thinking…')} ${color.dim(`· ${fmtElapsed(Date.now() - lastStepAt)}`)}`)
-  }, 1000)
+  // Single rolling spinner. Lazily started — we hold off until the title has
+  // been printed so the transcript reads `prompt → title → Thinking… → steps`
+  // instead of showing a premature `Thinking…` line before v0 has even
+  // replied.
+  let spin: ReturnType<typeof p.spinner> | null = null
+  let tick: ReturnType<typeof setInterval> | null = null
 
-  const rotateSpinner = (doneLabel: string) => {
-    const d = fmtElapsed(Date.now() - lastStepAt)
-    clearInterval(tick)
-    // Stop the current spinner with the finished-step line — that becomes
-    // the permanent entry in the transcript.
-    spin.stop(`${doneLabel} ${color.dim(`· ${d}`)}`)
+  const startSpinner = () => {
+    if (spin) return
     lastStepAt = Date.now()
-    // Start the next "thinking…" spinner for the gap until the next step.
     spin = p.spinner()
     spin.start(`${color.dim('Thinking…')} ${color.dim('· 0s')}`)
     tick = setInterval(() => {
@@ -90,6 +85,26 @@ export async function renderHumanStream(
         `${color.dim('Thinking…')} ${color.dim(`· ${fmtElapsed(Date.now() - lastStepAt)}`)}`,
       )
     }, 1000)
+  }
+
+  const rotateSpinner = (doneLabel: string) => {
+    // No spinner yet? The first step is landing before any title frame —
+    // print the step as a one-liner and start the idle spinner after it.
+    if (!spin) {
+      p.log.step(`${doneLabel} ${color.dim(`· ${fmtElapsed(Date.now() - lastStepAt)}`)}`)
+      startSpinner()
+      return
+    }
+    const d = fmtElapsed(Date.now() - lastStepAt)
+    if (tick) clearInterval(tick)
+    // Stop the current spinner with the finished-step line — that becomes
+    // the permanent entry in the transcript.
+    spin.stop(`${doneLabel} ${color.dim(`· ${d}`)}`)
+    lastStepAt = Date.now()
+    spin = null
+    tick = null
+    // Start the next "Thinking…" spinner for the gap until the next step.
+    startSpinner()
   }
 
   try {
@@ -140,10 +155,13 @@ export async function renderHumanStream(
     result.error = err instanceof Error ? err.message : String(err)
   }
 
-  clearInterval(tick)
-  // Close the trailing spinner silently (no label) — the summary block below
-  // carries the final state.
-  spin.stop()
+  if (tick) clearInterval(tick)
+  if (spin) {
+    // Close the trailing spinner silently (no label) — the summary block
+    // below carries the final state.
+    spin.stop()
+    spin = null
+  }
 
   const elapsed = fmtElapsed(Date.now() - startedAt)
 
