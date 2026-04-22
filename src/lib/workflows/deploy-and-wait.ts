@@ -143,87 +143,120 @@ export async function* streamDeployment(
   // of rendering blank for the first few seconds.
   yield { kind: 'idle', label: 'Queued' }
 
-  // Heuristic phase detection from log messages. v0's deployment API
-  // doesn't expose status, so we infer steps from what the build logs say.
+  // Heuristic phase detection from Vercel build logs. The real log text is
+  // unstructured ('Running "install" command: `bun install`...',
+  // 'Compiled successfully in 2.3s', 'Build Completed in /vercel/output [6s]',
+  // 'Deployment completed'). Match the authoritative signals below.
   const seenPhases = new Set<string>()
   const phasePatterns: Array<{ re: RegExp; complete: string; nextIdle: string }> = [
-    { re: /initializ/i, complete: 'Initialized', nextIdle: 'Installing' },
-    { re: /install/i, complete: 'Installed deps', nextIdle: 'Building' },
-    { re: /compil/i, complete: 'Compiled', nextIdle: 'Building' },
-    { re: /build.*(complete|success|passed)|next build/i, complete: 'Built', nextIdle: 'Uploading' },
-    { re: /uploading|pushing/i, complete: 'Uploaded', nextIdle: 'Deploying' },
+    { re: /Retrieving list of deployment files/i, complete: 'Retrieved files', nextIdle: 'Downloading' },
+    { re: /Downloading .* deployment files/i, complete: 'Downloaded files', nextIdle: 'Installing' },
+    { re: /Running .+install. command/i, complete: 'Installing…', nextIdle: 'Installing' },
+    { re: /Creating an optimized production build/i, complete: 'Install complete', nextIdle: 'Compiling' },
+    { re: /Compiled successfully/i, complete: 'Compiled', nextIdle: 'Optimizing' },
+    { re: /Finalizing page optimization/i, complete: 'Optimized', nextIdle: 'Building' },
+    { re: /Build Completed in/i, complete: 'Built', nextIdle: 'Deploying' },
+    { re: /Deploying outputs/i, complete: 'Uploaded outputs', nextIdle: 'Finalizing' },
   ]
 
-  while (Date.now() < deadline) {
-    // Probe the webUrl. 200/3xx = live, 5xx = build error, 4xx/timeout
-    // = still building. This is our real 'is it ready' signal.
-    if (webUrl) {
-      let probeStatus = 0
-      try {
-        const res = await fetch(webUrl, { method: 'HEAD', redirect: 'follow' })
-        probeStatus = res.status
-      } catch {
-        // Network/DNS not ready yet — expected while deploy is queued
-      }
+  // Terminal signals — one of these means the deploy is live.
+  const TERMINAL_SUCCESS = /Deployment completed/i
+  const TERMINAL_ERROR =
+    /Build failed|Error:|Deployment failed|Command "vercel build" exited with/i
 
-      if (probeStatus >= 200 && probeStatus < 400) {
-        yield { kind: 'step', label: 'Deployed' }
-        if (typeof deployment.id === 'string') {
-          yield { kind: 'meta', key: 'deploy', value: deployment.id }
-        }
-        yield { kind: 'meta', key: 'url', value: webUrl, accent: true }
-        if (inspectorUrl) {
-          yield { kind: 'meta', key: 'inspector', value: inspectorUrl, accent: true }
-        }
-        yield { kind: 'done' }
-        const result: PollResult = {
-          deployment,
-          durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
-          reason: 'terminal',
-        }
-        if (lastLogTs) result.lastLogTs = lastLogTs
-        return result
-      }
-
-      if (probeStatus >= 500) {
-        yield {
-          kind: 'error',
-          message: `Deployment URL returned HTTP ${probeStatus}. Check ${inspectorUrl || webUrl} for details.`,
-        }
-        const result: PollResult = {
-          deployment,
-          durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
-          reason: 'terminal',
-        }
-        if (lastLogTs) result.lastLogTs = lastLogTs
-        return result
-      }
+  const finish = (
+    kind: 'success' | 'error',
+    errMsg?: string,
+  ): {
+    event: StepEvent
+    result: PollResult
+  } => {
+    const result: PollResult = {
+      deployment,
+      durationMs: Date.now() - (deadline - opts.timeoutSec * 1000),
+      reason: 'terminal',
     }
+    if (lastLogTs) result.lastLogTs = lastLogTs
+    return {
+      event:
+        kind === 'success'
+          ? { kind: 'done' }
+          : {
+              kind: 'error',
+              message: errMsg ?? 'Deployment failed — check the inspector for details.',
+            },
+      result,
+    }
+  }
 
-    // Tail logs + derive phase transitions from message content.
+  while (Date.now() < deadline) {
+    // Tail logs from v0 API. The real shape is { data: { logs: [...] } }
+    // with entries having { text, level, createdAt, type } — NOT
+    // { message, timestamp }. We key on createdAt parsed to millis.
+    let terminalEvent:
+      | { kind: 'success' }
+      | { kind: 'error'; message: string }
+      | null = null
+
     try {
-      const logs = (await client.deployments.findLogs({
+      const rawLogs = (await client.deployments.findLogs({
         deploymentId: opts.deploymentId,
-        ...(lastLogTs ? { since: lastLogTs } : {}),
-      })) as unknown as { data?: Array<{ timestamp?: number; message?: string }> } | Array<unknown>
-      const entries = Array.isArray(logs)
-        ? (logs as Array<{ timestamp?: number; message?: string }>)
-        : (logs.data ?? [])
+      })) as unknown as {
+        data?: { logs?: Array<{ text?: string; createdAt?: string; level?: string }> }
+      }
+      const entries = rawLogs?.data?.logs ?? []
+
       for (const entry of entries) {
-        if (entry.timestamp && entry.timestamp > lastLogTs) lastLogTs = entry.timestamp
-        const msg = entry.message ?? ''
+        const createdAt = entry.createdAt ? Date.parse(entry.createdAt) : 0
+        if (Number.isFinite(createdAt) && createdAt > 0) {
+          lastLogTs = Math.max(lastLogTs, createdAt)
+        }
+        const text = entry.text ?? ''
+        if (!text) continue
+
+        // Phase matching.
         for (const phase of phasePatterns) {
           if (seenPhases.has(phase.complete)) continue
-          if (phase.re.test(msg)) {
+          if (phase.re.test(text)) {
             seenPhases.add(phase.complete)
             yield { kind: 'step', label: phase.complete }
             yield { kind: 'idle', label: phase.nextIdle }
             break
           }
         }
+
+        // Terminal signals override everything — break out as soon as one
+        // lands so we don't keep polling after the deploy is done.
+        if (TERMINAL_SUCCESS.test(text)) {
+          terminalEvent = { kind: 'success' }
+          break
+        }
+        if (TERMINAL_ERROR.test(text)) {
+          terminalEvent = { kind: 'error', message: text.slice(0, 200) }
+          break
+        }
       }
     } catch {
-      // logs can fail while queued — ignore
+      // logs can fail while queued — ignore, we'll retry next interval
+    }
+
+    if (terminalEvent) {
+      if (terminalEvent.kind === 'success') {
+        yield { kind: 'step', label: 'Deployed' }
+        if (typeof deployment.id === 'string') {
+          yield { kind: 'meta', key: 'deploy', value: deployment.id }
+        }
+        if (webUrl) yield { kind: 'meta', key: 'url', value: webUrl, accent: true }
+        if (inspectorUrl) {
+          yield { kind: 'meta', key: 'inspector', value: inspectorUrl, accent: true }
+        }
+        const { event, result } = finish('success')
+        yield event
+        return result
+      }
+      const { event, result } = finish('error', terminalEvent.message)
+      yield event
+      return result
     }
 
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
