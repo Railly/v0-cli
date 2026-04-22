@@ -14,7 +14,7 @@
   },
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --target=node --outdir=dist --banner='#!/usr/bin/env node'",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
     "build:binary": "bun build --compile src/index.ts --outfile=dist/v0",
     "lint": "biome check .",
     "format": "biome format --write .",
