@@ -18,6 +18,7 @@ const TRUST_MAP: Record<string, TrustLevel> = {
   'skill update': 'T0',
   'skill status': 'T0',
   'skill uninstall': 'T0',
+  upload: 'T0',
   'project list': 'T0',
   'project show': 'T0',
   'chat list': 'T0',

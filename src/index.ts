@@ -37,6 +37,7 @@ import { rateLimitsCommand } from './commands/rate-limits.ts'
 import { reportCommand } from './commands/report.ts'
 import { schemaCommand } from './commands/schema.ts'
 import { skillCommand } from './commands/skill.ts'
+import { uploadCommand } from './commands/upload.ts'
 import { userCommand } from './commands/user.ts'
 import { versionCommand } from './commands/version.ts'
 import { mountHelp } from './lib/ui/help.ts'
@@ -89,6 +90,7 @@ program.addCommand(schemaCommand())
 program.addCommand(auditCommand())
 program.addCommand(killswitchCommand())
 program.addCommand(skillCommand())
+program.addCommand(uploadCommand())
 
 // Shorthand router: turns a single positional arg into either
 //   `v0 chat init <source>`   when it looks like a path, URL, or template id

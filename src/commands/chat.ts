@@ -94,6 +94,10 @@ export function chatCommand(): Command {
       '--background',
       'spawn a detached worker, return chat_id immediately; watch/wait later',
     )
+    .option(
+      '--attachment <path-or-url...>',
+      'attach a file (local path → auto-uploads to catbox) or a public URL. Repeatable.',
+    )
     .option('--params <json>', 'raw JSON body, merged with sugar flags (--params wins on conflict)')
     .action(
       runCommand(async ({ client, mode, profile, opts, cmd, recordResult }) => {
@@ -107,6 +111,7 @@ export function chatCommand(): Command {
           thinking?: boolean
           stream?: boolean
           background?: boolean
+          attachment?: string[]
           params?: string
         }>()
 
@@ -126,6 +131,34 @@ export function chatCommand(): Command {
                 : {}),
             ...(raw.thinking ? { thinking: true } : {}),
           }
+        }
+
+        // --attachment: each entry is either an http(s) URL (used as-is) or
+        // a local path (auto-uploaded to catbox and the returned URL used).
+        // Uploads happen sequentially so failures surface clearly with the
+        // offending path, not as a Promise.all blob.
+        if (raw.attachment && raw.attachment.length > 0) {
+          const { isHttpUrl, uploadToCatbox } = await import('../lib/uploads/catbox.ts')
+          const attachments: Array<{ url: string }> = []
+          for (const entry of raw.attachment) {
+            if (isHttpUrl(entry)) {
+              attachments.push({ url: entry })
+              continue
+            }
+            if (mode === 'human') {
+              process.stderr.write(
+                `${color.dim('[attach]')} ${color.muted('uploading')} ${color.accent(entry)}\n`,
+              )
+            }
+            const uploaded = await uploadToCatbox(entry)
+            if (mode === 'human') {
+              process.stderr.write(
+                `${color.dim('[attach]')} ${color.muted('→')} ${color.accent(uploaded.url)}\n`,
+              )
+            }
+            attachments.push({ url: uploaded.url })
+          }
+          sugar.attachments = attachments
         }
 
         const body = mergeParams(sugar, parseParamsJson(raw.params), (key) => {
