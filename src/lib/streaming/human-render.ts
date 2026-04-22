@@ -28,6 +28,17 @@ function fmtElapsed(ms: number): string {
   return `${m}m${r.toString().padStart(2, '0')}s`
 }
 
+/**
+ * Live render for v0 SSE streams. Matches v0.app's transcript style:
+ * only past-tense step lines are printed, one per step, with a rolling
+ * `Thinking…` spinner between them.
+ *
+ * v0 emits both `taskNameActive` (present continuous: "Reading globals")
+ * and `taskNameComplete` (past tense: "Read globals") — often in the same
+ * frame as state replay. We ignore active labels entirely and render each
+ * unique complete label as a one-liner. The spinner between lines shows
+ * the elapsed since the last completion.
+ */
 export async function renderHumanStream(
   stream: AsyncIterable<StreamFrame>,
   opts: { prompt?: string } = {},
@@ -41,63 +52,44 @@ export async function renderHumanStream(
     p.log.message(color.dim(short))
   }
 
-  const spin = p.spinner()
-  spin.start('Connecting to v0…')
-
-  // Title: prefer `chat.title` stream over `chat.name` (they usually carry the
-  // same value but v0 emits both, so we replace — never concat). Titles arrive
-  // as full replacement deltas in practice. We print the title ONCE the first
-  // time it stabilizes and keep it out of the spinner label — otherwise every
-  // re-render tattoos the title into the transcript on each update.
+  // Title: prefer chat.title over chat.name. Print once, early.
   let titleValue = ''
   let titleSource: 'title' | 'name' | '' = ''
   let titlePrinted = false
-
-  // Current active label. Reset when task-complete arrives.
-  let currentTask = ''
-
-  // Completed steps in first-seen order. v0 re-emits task-complete frames
-  // for the same labels as the content chunk replays state; we only want
-  // to show each label once.
-  const completedSteps: string[] = []
-  const completedSet = new Set<string>()
-
-  // Track the last task the renderer showed as active. v0 re-emits
-  // completes repeatedly; between those the currentTask is cleared but the
-  // next active frame is often the same label. We keep showing the last
-  // known label while we wait for the next task to start so the spinner
-  // never flashes "Thinking…" back mid-run.
-  let lastShown = ''
-
-  const setLabel = () => {
-    const elapsed = fmtElapsed(Date.now() - startedAt)
-    const label = currentTask || lastShown || 'Thinking…'
-    spin.message(`${color.bold(label)} ${color.dim(`· ${elapsed}`)}`)
-  }
-
   const maybePrintTitle = () => {
     if (titlePrinted || !titleValue) return
-    // Only print once we're confident the title is stable — either we got
-    // a chat.title frame (authoritative), or we've buffered a chat.name long
-    // enough that the first step started.
-    if (titleSource === 'title' || completedSteps.length > 0) {
-      p.log.info(color.bold(titleValue))
-      titlePrinted = true
-    }
+    p.log.info(color.bold(titleValue))
+    titlePrinted = true
   }
 
-  // Live elapsed timer — refresh even when no frames are arriving.
-  const tick = setInterval(setLabel, 1000)
+  const seenComplete = new Set<string>()
+  let stepCount = 0
+  let lastStepAt = Date.now()
 
-  const pushStepIfNew = (label: string) => {
-    if (completedSet.has(label)) return
-    completedSet.add(label)
-    completedSteps.push(label)
-    // Print the title the moment the first step completes if we haven't yet,
-    // so the transcript reads: [title] → step → step → … → summary.
-    maybePrintTitle()
-    // Print the step itself above the spinner so the trail survives.
-    p.log.step(color.dim(label))
+  // Single rolling spinner. Starts as "Thinking…", reopens after every step.
+  let spin = p.spinner()
+  spin.start(`${color.dim('Thinking…')} ${color.dim('· 0s')}`)
+  let tick: ReturnType<typeof setInterval> = setInterval(() => {
+    if (!spin) return
+    spin.message(`${color.dim('Thinking…')} ${color.dim(`· ${fmtElapsed(Date.now() - lastStepAt)}`)}`)
+  }, 1000)
+
+  const rotateSpinner = (doneLabel: string) => {
+    const d = fmtElapsed(Date.now() - lastStepAt)
+    clearInterval(tick)
+    // Stop the current spinner with the finished-step line — that becomes
+    // the permanent entry in the transcript.
+    spin.stop(`${doneLabel} ${color.dim(`· ${d}`)}`)
+    lastStepAt = Date.now()
+    // Start the next "thinking…" spinner for the gap until the next step.
+    spin = p.spinner()
+    spin.start(`${color.dim('Thinking…')} ${color.dim('· 0s')}`)
+    tick = setInterval(() => {
+      if (!spin) return
+      spin.message(
+        `${color.dim('Thinking…')} ${color.dim(`· ${fmtElapsed(Date.now() - lastStepAt)}`)}`,
+      )
+    }, 1000)
   }
 
   try {
@@ -107,33 +99,28 @@ export async function renderHumanStream(
         switch (phase.kind) {
           case 'chat-created':
             result.chatId = phase.chatId
-            setLabel()
             break
           case 'title':
-            // `chat.title` outranks `chat.name` once either has been seen.
-            // After a `chat.title` lands we ignore future `chat.name` deltas.
             if (phase.source === 'title') {
               titleValue = phase.title
               titleSource = 'title'
+              maybePrintTitle()
             } else if (titleSource !== 'title') {
               titleValue = phase.title
               titleSource = 'name'
             }
-            maybePrintTitle()
-            setLabel()
             break
           case 'task-active':
-            currentTask = phase.label
-            lastShown = phase.label
-            setLabel()
+            // We deliberately ignore these — v0 emits both active + complete
+            // on the same frame, and showing only the past-tense line per
+            // step gives the clean v0.app-style transcript.
             break
           case 'task-complete':
-            pushStepIfNew(phase.label)
-            // Keep the last label on screen until the next active comes in,
-            // otherwise the spinner flashes 'Thinking…' every time a task
-            // completes before the next one starts.
-            currentTask = ''
-            setLabel()
+            if (seenComplete.has(phase.label)) break
+            seenComplete.add(phase.label)
+            stepCount++
+            maybePrintTitle()
+            rotateSpinner(phase.label)
             break
           case 'done':
             result.chatId = phase.chatId
@@ -154,24 +141,22 @@ export async function renderHumanStream(
   }
 
   clearInterval(tick)
+  // Close the trailing spinner silently (no label) — the summary block below
+  // carries the final state.
+  spin.stop()
+
   const elapsed = fmtElapsed(Date.now() - startedAt)
 
   if (result.error) {
-    spin.stop(color.error(`Failed after ${elapsed}`))
     p.log.error(result.error)
-    p.outro(color.error('Chat not created.'))
+    p.outro(color.error(`Failed after ${elapsed}.`))
     return result
   }
 
-  spin.stop(
-    `${color.success('✓')} Generated in ${color.bold(elapsed)} ${color.dim(`(${completedSteps.length} step${completedSteps.length === 1 ? '' : 's'})`)}`,
-  )
-
-  // Emit title here only if we never got around to printing it (e.g. no
-  // steps arrived — pathological but possible).
   if (!titlePrinted && result.title) {
     p.log.info(color.bold(result.title))
   }
+
   const rows: string[] = []
   if (result.chatId) rows.push(`${color.muted('chat    ')} ${result.chatId}`)
   if (result.versionId) rows.push(`${color.muted('version ')} ${result.versionId}`)
@@ -199,6 +184,6 @@ export async function renderHumanStream(
   }
   if (next.length) p.log.message(next.join('\n'))
 
-  p.outro(color.success('Done.'))
+  p.outro(`${color.success('Done')} ${color.dim(`· ${elapsed}`)} ${color.dim(`(${stepCount} step${stepCount === 1 ? '' : 's'})`)}`)
   return result
 }
