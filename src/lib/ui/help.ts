@@ -91,7 +91,10 @@ export function mountHelp(program: Command): void {
         example('check account + plan + rate limits', 'auth whoami --json')
         example('iterate on an existing chat', 'msg send <chat-id> "add dark mode"')
         example('download a version as a zip', 'version download <chat> <ver>')
-        example('ship a deployment (auto-resolves latest version)', 'deploy create <chat> --yes --wait')
+        example(
+          'ship a deployment (auto version, auto project, live transcript)',
+          'deploy create <chat> --yes',
+        )
         example('parallel: fire 3 chats, collect later', '"hero" --background --json')
         example('introspect any of the 55 operations', 'schema chats.init')
 

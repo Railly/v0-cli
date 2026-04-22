@@ -98,7 +98,11 @@ export function deployCommand(): Command {
     )
     .option('--project <id>', 'project id (defaults to chat owner)')
     .option('--no-auto-project', "don't auto-create a project when the chat has none")
-    .option('--wait', 'poll logs + errors until deployment reaches terminal state')
+    .option(
+      '--wait',
+      'poll until deployment reaches terminal state — default in human mode',
+    )
+    .option('--no-wait', 'return immediately after the deploy is queued')
     .option('--interval <seconds>', 'poll interval', '3')
     .action(
       runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
@@ -272,7 +276,11 @@ export function deployCommand(): Command {
         })
         recordResult(deployment)
 
-        if (!raw.wait) {
+        // Default: wait in human mode (so you see the live transcript), skip
+        // in JSON mode (so agents return fast). --wait / --no-wait overrides.
+        const wantWait = raw.wait === true || (raw.wait !== false && mode === 'human')
+
+        if (!wantWait) {
           if (mode === 'json') return emitSuccess(deployment)
           const detail = deployment as unknown as {
             id?: string

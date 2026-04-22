@@ -30,7 +30,7 @@ Core workflow:
 ```bash
 v0 msg send <chat-id> "swap the hero copy"           # iterate (streams live)
 v0 version download <chat> <ver> --out ./build.zip   # pull the archive
-v0 deploy create <chat> --yes --wait                 # ship (auto-resolves latest version)
+v0 deploy create <chat> --yes                        # ship (auto version, auto project, live transcript)
 v0 "hero" --background --json                        # fire-and-forget for agents
 ```
 

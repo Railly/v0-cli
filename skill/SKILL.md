@@ -174,9 +174,10 @@ v0 version download "$CHAT" "$VER" --out ./build.zip --json
 # T2 — preview deploy without side effect
 v0 deploy create "$CHAT" --dry-run --json
 
-# T2 — ship. --yes is required in non-TTY; --wait polls until terminal status.
-# --wait in human mode streams status transitions as past-tense steps
-# (Queued · 2s, Built · 45s, Deployed · 12s, …). --json emits NDJSON.
+# T2 — ship. --yes is required in non-TTY; --wait is default in human mode.
+# Human TTY: streams status transitions as past-tense steps (Queued · 2s,
+# Built · 45s, Deployed · 12s, …). Agents (--json): return fast after the
+# deploy is queued unless --wait is passed, in which case NDJSON.
 #
 # If the chat has no project yet, deploy auto-creates one using the chat's
 # title (or a fallback name) and assigns the chat to it — shown in the T2
@@ -184,7 +185,8 @@ v0 deploy create "$CHAT" --dry-run --json
 # disable and force the user/agent to link a project first.
 #
 # Pass <version-id> explicitly when deploying an older snapshot; omit for latest.
-v0 deploy create "$CHAT" --yes --wait --json
+v0 deploy create "$CHAT" --yes --wait --json                # agent: block until terminal
+v0 deploy create "$CHAT" --yes --no-wait --json             # agent: queue and exit fast
 v0 deploy create "$CHAT" "$VER" --yes --wait --json         # pin to a specific ver
 v0 deploy create "$CHAT" --project prj_xxx --yes --wait     # pin to existing project
 v0 deploy create "$CHAT" --no-auto-project --yes --wait     # require pre-assigned project

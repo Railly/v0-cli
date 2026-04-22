@@ -146,7 +146,7 @@ export async function renderHumanStream(
     // `deploy create` auto-resolves the latest version when version-id is
     // omitted, so the shortest ship command is just `deploy create <chat>`.
     process.stdout.write(
-      `${color.dim('ship:   ')} v0 deploy create ${result.chatId} --yes --wait\n`,
+      `${color.dim('ship:   ')} v0 deploy create ${result.chatId} --yes\n`,
     )
   }
 
