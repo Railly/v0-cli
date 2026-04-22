@@ -155,6 +155,53 @@ v0 chat create --message "..." --stream --json
 # Warning on stderr: SSE has no resume; a network flap requires re-sending.
 ```
 
+### 2b. Parallel chat creation (background)
+
+Each `chat create` blocks ~30-60s waiting on the v0 generation. If you need
+more than one chat you should not serialize them. Use `--background` to
+detach a worker and get the `chat_id` back immediately (<1s), then reach
+back with `chat wait` / `chat watch` / `chat status` when ready.
+
+```bash
+# Kick off N chats in parallel. Each returns in <1s.
+v0 "hero section"   --background --json
+# → { "chat_id": "chat_abc", "status": "running", "pid": 12345, ... }
+v0 "pricing table"  --background --json
+v0 "footer"         --background --json
+
+# Do other work. When ready, join them.
+v0 chat pending --json                 # list all in-flight + done
+v0 chat wait chat_abc --json           # block until this one finishes;
+                                       # returns the same shape as a
+                                       # synchronous chat create envelope
+v0 chat wait chat_def --timeout 60     # bounded wait; exit 124 on timeout
+v0 chat status chat_ghi --json         # one-shot snapshot
+v0 chat watch chat_ghi --json          # tail the live NDJSON stream log
+v0 chat pending --clean --json         # GC finished entries >1h old
+```
+
+Semantics:
+
+- Worker persists state at `$APP_HOME/pending/{chat_id}.json` and appends
+  SSE frames to `{chat_id}.ndjson`. Safe across CLI crashes — the chat
+  keeps running on v0's servers and `chat watch` can re-attach.
+- `chat wait` polls the record every 500ms by default; exit 124 on
+  timeout, exit 1 on failure or stalled worker (pid gone while status
+  still says running).
+- `--background` is T1 only. It refuses to attach to T2/T3 writes by
+  construction because only `chat create` exposes the flag.
+
+Use this when:
+
+- You need >1 chat and don't want to serialize 30s waits.
+- You want to spawn a long generation, continue with other tools, then
+  collect later.
+- You want the human to be able to open a second terminal and
+  `v0 chat watch <id>` on a chat the agent started.
+
+Do NOT use this for single chats where you're going to wait anyway —
+plain `v0 chat create --json` is simpler and emits a single envelope.
+
 ### 3. Env var sync against a local `.env`
 
 ```bash
