@@ -48,6 +48,10 @@ export function killswitchPath(): string {
   return join(paths().state, 'killswitch')
 }
 
+export function pendingDir(): string {
+  return join(paths().state, 'pending')
+}
+
 export async function ensureConfigDir(): Promise<void> {
   const p = paths()
   ensureHome(p)
@@ -56,4 +60,5 @@ export async function ensureConfigDir(): Promise<void> {
   await mkdir(profilesDir(), { recursive: true, mode: 0o700 })
   await mkdir(intentsDir(), { recursive: true, mode: 0o700 })
   await mkdir(logsDir(), { recursive: true })
+  await mkdir(pendingDir(), { recursive: true })
 }
