@@ -1,6 +1,16 @@
 #!/usr/bin/env bun
 import { Command } from 'commander'
 import pkg from '../package.json' with { type: 'json' }
+import { isBackgroundWorker, runBackgroundWorker } from './lib/background/spawn.ts'
+
+// Background worker fast-path: bypass commander entirely. The parent CLI spawns
+// this process with V0CLI_BACKGROUND_WORKER=1 and a JSON payload on stdin, then
+// unrefs once it sees the handshake line. Everything after is worker logic.
+if (isBackgroundWorker()) {
+  await runBackgroundWorker()
+  process.exit(0)
+}
+
 import { auditCommand } from './commands/audit.ts'
 import { authCommand } from './commands/auth.ts'
 import { chatCommand } from './commands/chat.ts'

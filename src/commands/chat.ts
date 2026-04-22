@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { readSseStream } from '../lib/api/streaming.ts'
+import { attachBackgroundSubcommands } from './chat-background.ts'
 import { bullet, section, table } from '../lib/output/human.ts'
 import { emitSuccess } from '../lib/output/json.ts'
 import { emitNdjsonEvent } from '../lib/output/ndjson.ts'
@@ -84,9 +85,13 @@ export function chatCommand(): Command {
     .option('--thinking', 'enable modelConfiguration.thinking')
     .option('--stream', 'force SSE streaming (human render or --json NDJSON)')
     .option('--no-stream', 'disable streaming, block until the chat returns')
+    .option(
+      '--background',
+      'spawn a detached worker, return chat_id immediately; watch/wait later',
+    )
     .option('--params <json>', 'raw JSON body, merged with sugar flags (--params wins on conflict)')
     .action(
-      runCommand(async ({ client, mode, profile, cmd, recordResult }) => {
+      runCommand(async ({ client, mode, profile, opts, cmd, recordResult }) => {
         const args = cmd.args as string[]
         const raw = cmd.opts<{
           message?: string
@@ -96,6 +101,7 @@ export function chatCommand(): Command {
           model?: string
           thinking?: boolean
           stream?: boolean
+          background?: boolean
           params?: string
         }>()
 
@@ -124,6 +130,46 @@ export function chatCommand(): Command {
         })
 
         await validateBody({ operationId: 'chats.create', body })
+
+        if (raw.background) {
+          const { detachBackground } = await import('../lib/background/spawn.ts')
+          const { resolveApiKey } = await import('../lib/config/profiles.ts')
+          const apiKey = resolveApiKey(profile, opts.apiKey)
+          if (!apiKey) throw new Error('V0_API_KEY missing — cannot spawn background worker')
+          const detached = await detachBackground({
+            prompt: message ?? '',
+            body: body as Record<string, unknown>,
+            apiKey,
+            ...(opts.baseUrl !== undefined ? { baseUrl: opts.baseUrl } : {}),
+            profile: profile ? undefined : undefined,
+          })
+          recordResult({
+            background: true,
+            chatId: detached.chatId,
+            pid: detached.pid,
+            status: detached.status,
+          })
+          if (mode === 'json') {
+            return emitSuccess({
+              chat_id: detached.chatId,
+              status: detached.status,
+              pid: detached.pid,
+              started_at: detached.startedAt,
+              stream_log: detached.streamLog,
+            })
+          }
+          process.stdout.write(`${section('chat queued (background)')}\n`)
+          process.stdout.write(`  ${color.accent('chat   ')} ${detached.chatId}\n`)
+          process.stdout.write(`  ${color.accent('pid    ')} ${detached.pid}\n`)
+          process.stdout.write(`  ${color.accent('status ')} ${color.warn('running')}\n`)
+          process.stdout.write(
+            `\n  ${color.dim('watch:')}  v0 chat watch ${detached.chatId}\n`,
+          )
+          process.stdout.write(
+            `  ${color.dim('wait:')}   v0 chat wait ${detached.chatId}\n`,
+          )
+          return
+        }
 
         // Default: stream in human mode, block in json mode. --stream/--no-stream overrides.
         const wantStream = raw.stream === true || (raw.stream !== false && mode === 'human')
@@ -387,6 +433,8 @@ export function chatCommand(): Command {
         process.stdout.write(`${bullet(`deleted ${color.accent(chatId)}`)}\n`)
       }),
     )
+
+  attachBackgroundSubcommands(cmd)
 
   return cmd
 }
