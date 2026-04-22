@@ -94,15 +94,21 @@ export function deployCommand(): Command {
   cmd
     .command('create <chat-id> [version-id]')
     .description(
-      "Deploy a chat version to Vercel (T2). Omit version-id to use the chat's latest version. Requires --yes or interactive confirm.",
+      "Deploy a chat version to Vercel (T2). Omit version-id to use the chat's latest version. Auto-creates a project from the chat title if none is assigned (unless --no-auto-project).",
     )
     .option('--project <id>', 'project id (defaults to chat owner)')
+    .option('--no-auto-project', "don't auto-create a project when the chat has none")
     .option('--wait', 'poll logs + errors until deployment reaches terminal state')
     .option('--interval <seconds>', 'poll interval', '3')
     .action(
       runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
         const [chatId, explicitVersionId] = cmd.args as [string, string | undefined]
-        const raw = cmd.opts<{ project?: string; wait?: boolean; interval?: string }>()
+        const raw = cmd.opts<{
+          project?: string
+          autoProject?: boolean
+          wait?: boolean
+          interval?: string
+        }>()
 
         // Resolve version-id when not given. `findVersions(limit=1)` returns
         // the newest. This is pure DX: agents should still pass explicit ids
@@ -138,10 +144,54 @@ export function deployCommand(): Command {
           ...(raw.project ? { projectId: raw.project } : {}),
         })
 
+        // If the chat has no project yet, auto-create one from the chat title
+        // and assign it. Controlled by --no-auto-project (opt-out). Agents
+        // that want deterministic behavior pass --project explicitly or
+        // --no-auto-project to get the old error with the recovery hint.
+        let autoCreatedProject: { id: string; name: string } | undefined
+        if (!preview.projectId && raw.autoProject !== false) {
+          // Resolve a name: chat title → chat name → 'Untitled <chatId>'.
+          const chat = (await client.chats.getById({ chatId }).catch(() => null)) as {
+            title?: string
+            name?: string
+          } | null
+          const projectName =
+            chat?.title || chat?.name || `Untitled ${chatId.slice(0, 8)}`
+
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.dim('[deploy]')} ${color.muted('no project on chat →')} ${color.muted('creating')} ${color.accent(`"${projectName}"`)}\n`,
+            )
+          }
+
+          const created = (await client.projects.create({
+            name: projectName,
+          })) as { id?: string; name?: string }
+          if (!created.id) {
+            throw new CliError(
+              {
+                code: 'project_create_failed',
+                type: 'validation_error',
+                message: 'auto-create project returned no id',
+              },
+              1,
+            )
+          }
+          await client.projects.assign({ projectId: created.id, chatId })
+          autoCreatedProject = { id: created.id, name: created.name ?? projectName }
+          preview.projectId = created.id
+          preview.projectName = created.name ?? projectName
+
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.dim('[deploy]')} ${color.muted('assigned chat to project')} ${color.accent(created.id)}\n`,
+            )
+          }
+        }
+
         if (!preview.projectId) {
-          // Help the user recover: show the top few projects so they can pick
-          // one, or the exact assign command. This is human-mode polish; JSON
-          // mode still gets a clean error envelope.
+          // Fallback: auto-create was disabled or failed silently. Show the
+          // recovery hint with the top few existing projects.
           let hint =
             'Could not determine projectId. Pass --project <id>, or run `v0 project assign <project-id> ' +
             chatId +
@@ -197,6 +247,9 @@ export function deployCommand(): Command {
           project: preview.projectId,
         }
         if (preview.projectName) confirmPreview.name = preview.projectName
+        if (autoCreatedProject) {
+          confirmPreview.project = `${autoCreatedProject.id} (just created)`
+        }
         if (preview.vercelProjectId) confirmPreview.vercel = preview.vercelProjectId
         if (preview.versionFiles !== undefined) confirmPreview.files = String(preview.versionFiles)
         if (preview.hooks?.length)
