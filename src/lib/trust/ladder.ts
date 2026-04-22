@@ -60,6 +60,7 @@ const TRUST_MAP: Record<string, TrustLevel> = {
   'intent issue': 'T1',
   'intent list': 'T0',
   'intent purge': 'T1',
+  init: 'T1',
 
   // T2: confirm
   'deploy create': 'T2',

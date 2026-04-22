@@ -8,6 +8,7 @@ import { deployCommand } from './commands/deploy.ts'
 import { doctorCommand } from './commands/doctor.ts'
 import { envCommand } from './commands/env.ts'
 import { hookCommand } from './commands/hook.ts'
+import { initCommand } from './commands/init.ts'
 import { integrationsCommand } from './commands/integrations.ts'
 import { intentCommand } from './commands/intent.ts'
 import { killswitchCommand } from './commands/killswitch.ts'
@@ -48,6 +49,7 @@ program.addCommand(authCommand())
 program.addCommand(userCommand())
 program.addCommand(rateLimitsCommand())
 program.addCommand(doctorCommand())
+program.addCommand(initCommand())
 program.addCommand(envCommand())
 program.addCommand(intentCommand())
 program.addCommand(projectCommand())
