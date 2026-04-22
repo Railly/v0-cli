@@ -11,6 +11,14 @@ if (isBackgroundWorker()) {
   process.exit(0)
 }
 
+// Short-circuit `v0 --version` BEFORE commander sees it, so subcommands like
+// `deploy list --version <id>` keep their own --version flag free. This only
+// fires when --version is the *only* non-node-arg (argv.length === 3).
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write(`${pkg.version}\n`)
+  process.exit(0)
+}
+
 import { auditCommand } from './commands/audit.ts'
 import { authCommand } from './commands/auth.ts'
 import { chatCommand } from './commands/chat.ts'
@@ -37,7 +45,12 @@ const program = new Command()
 program
   .name('v0')
   .description('Agent-first CLI for the v0 Platform API (api.v0.dev/v1).')
-  .version(pkg.version)
+  // Use -V / --cli-version instead of commander's default `-V, --version`.
+  // Reason: subcommands need --version free so `deploy list --version <id>`
+  // can pass a real v0 version identifier. If the root owns --version,
+  // commander shadows every subcommand and prints the CLI package version
+  // on any attempted subcommand usage.
+  .version(pkg.version, '-V, --cli-version', 'print the v0-cli version')
   .option('--json', 'force machine-readable JSON output (auto when stdout is not a TTY)')
   .option('--dry-run', 'preview without calling mutating endpoints')
   .option('--fields <list>', 'comma-separated whitelist of top-level keys in output')

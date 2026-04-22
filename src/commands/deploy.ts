@@ -22,17 +22,75 @@ export function deployCommand(): Command {
 
   cmd
     .command('list')
-    .description('Find deployments by projectId + chatId + versionId')
-    .requiredOption('--project <id>', 'project id')
+    .description(
+      "List deployments. With --chat alone, auto-resolves project + latest version. Pass explicit ids to pin.",
+    )
+    .option('--project <id>', 'project id (inferred from --chat when omitted)')
     .requiredOption('--chat <id>', 'chat id')
-    .requiredOption('--version <id>', 'version id')
+    .option(
+      '--version <id>',
+      'version id (defaults to latest version of the chat)',
+    )
     .action(
       runCommand(async ({ client, mode, cmd }) => {
-        const raw = cmd.opts<{ project: string; chat: string; version: string }>()
+        const raw = cmd.opts<{ project?: string; chat: string; version?: string }>()
+
+        // Resolve projectId from chat if not provided.
+        let projectId = raw.project
+        if (!projectId) {
+          const p = (await client.projects
+            .getByChatId({ chatId: raw.chat })
+            .catch(() => null)) as { id?: string } | null
+          if (!p?.id) {
+            throw new CliError(
+              {
+                code: 'project_unresolved',
+                type: 'validation_error',
+                message: 'could not resolve project for chat',
+                userMessage: `Chat ${raw.chat} is not assigned to a project. Pass --project <id>, or deploy the chat first (that auto-creates and assigns a project).`,
+              },
+              4,
+            )
+          }
+          projectId = p.id
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.dim('[deploy]')} ${color.muted('resolved project →')} ${color.accent(projectId)}\n`,
+            )
+          }
+        }
+
+        // Resolve versionId = latest if not provided.
+        let versionId = raw.version
+        if (!versionId) {
+          const versions = (await client.chats.findVersions({
+            chatId: raw.chat,
+            limit: 1,
+          })) as { data?: Array<{ id?: string }> }
+          const latest = versions.data?.[0]?.id
+          if (!latest) {
+            throw new CliError(
+              {
+                code: 'version_unresolved',
+                type: 'validation_error',
+                message: 'no versions for chat',
+                userMessage: `Chat ${raw.chat} has no versions. Send a message first (v0 msg send ${raw.chat} "...") or pass --version <id> explicitly.`,
+              },
+              4,
+            )
+          }
+          versionId = latest
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.dim('[deploy]')} ${color.muted('resolved latest version →')} ${color.accent(latest)}\n`,
+            )
+          }
+        }
+
         const res = await client.deployments.find({
-          projectId: raw.project,
+          projectId,
           chatId: raw.chat,
-          versionId: raw.version,
+          versionId,
         })
         if (mode === 'json') return emitSuccess(res)
         const rows = (res as unknown as { data?: Array<Record<string, unknown>> }).data ?? []
