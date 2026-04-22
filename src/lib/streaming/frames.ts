@@ -2,7 +2,11 @@ import type { StreamFrame } from '../api/streaming.ts'
 
 export type PhaseEvent =
   | { kind: 'chat-created'; chatId: string; url?: string }
-  | { kind: 'title'; title: string }
+  // Title deltas are full replacements in most cases (v0 re-emits the
+  // whole title on each chunk). The renderer MUST replace, not concatenate.
+  // `source` lets the renderer prefer chat.title over chat.name when both
+  // arrive for the same chat (they usually carry the same value).
+  | { kind: 'title'; title: string; source: 'title' | 'name' }
   | { kind: 'task-active'; label: string }
   | { kind: 'task-complete'; label: string }
   | {
@@ -64,8 +68,12 @@ export function* extractPhases(frame: StreamFrame): Generator<PhaseEvent> {
     return
   }
 
-  if ((object === 'chat.title' || object === 'chat.name') && typeof obj.delta === 'string') {
-    yield { kind: 'title', title: obj.delta }
+  if (object === 'chat.title' && typeof obj.delta === 'string') {
+    yield { kind: 'title', title: obj.delta, source: 'title' }
+    return
+  }
+  if (object === 'chat.name' && typeof obj.delta === 'string') {
+    yield { kind: 'title', title: obj.delta, source: 'name' }
     return
   }
 

@@ -20,6 +20,14 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`
 }
 
+function fmtElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${m}m${r.toString().padStart(2, '0')}s`
+}
+
 export async function renderHumanStream(
   stream: AsyncIterable<StreamFrame>,
   opts: { prompt?: string } = {},
@@ -36,16 +44,43 @@ export async function renderHumanStream(
   const spin = p.spinner()
   spin.start('Connecting to v0…')
 
-  let titleBuf = ''
+  // Title: prefer `chat.title` stream over `chat.name` (they usually carry the
+  // same value but v0 emits both, so we replace — never concat). Titles arrive
+  // as full replacement deltas in practice.
+  let titleValue = ''
+  let titleSource: 'title' | 'name' | '' = ''
+
+  // Current active label. Reset when task-complete arrives.
   let currentTask = ''
-  let completed = 0
+
+  // Completed steps in first-seen order. v0 re-emits task-complete frames
+  // for the same labels as the content chunk replays state; we only want
+  // to show each label once.
+  const completedSteps: string[] = []
+  const completedSet = new Set<string>()
 
   const setLabel = () => {
+    const elapsed = fmtElapsed(Date.now() - startedAt)
     const parts: string[] = []
-    if (titleBuf) parts.push(color.bold(titleBuf))
-    if (currentTask) parts.push(color.dim(currentTask))
-    else if (completed > 0) parts.push(color.dim(`${completed} step${completed === 1 ? '' : 's'}`))
-    spin.message(parts.join(' · ') || 'Working…')
+    if (titleValue) parts.push(color.bold(titleValue))
+    if (currentTask) {
+      parts.push(color.dim(currentTask))
+    } else if (completedSteps.length > 0) {
+      parts.push(color.dim(`${completedSteps.length} steps`))
+    }
+    parts.push(color.dim(`· ${elapsed}`))
+    spin.message(parts.join(' '))
+  }
+
+  // Live elapsed timer — refresh even when no frames are arriving.
+  const tick = setInterval(setLabel, 1000)
+
+  const pushStepIfNew = (label: string) => {
+    if (completedSet.has(label)) return
+    completedSet.add(label)
+    completedSteps.push(label)
+    // Print above the spinner so the final transcript shows the step trail.
+    p.log.step(color.dim(label))
   }
 
   try {
@@ -58,7 +93,15 @@ export async function renderHumanStream(
             setLabel()
             break
           case 'title':
-            titleBuf += phase.title
+            // `chat.title` outranks `chat.name` once either has been seen.
+            // After a `chat.title` lands we ignore future `chat.name` deltas.
+            if (phase.source === 'title') {
+              titleValue = phase.title
+              titleSource = 'title'
+            } else if (titleSource !== 'title') {
+              titleValue = phase.title
+              titleSource = 'name'
+            }
             setLabel()
             break
           case 'task-active':
@@ -66,7 +109,7 @@ export async function renderHumanStream(
             setLabel()
             break
           case 'task-complete':
-            completed++
+            pushStepIfNew(phase.label)
             currentTask = ''
             setLabel()
             break
@@ -76,7 +119,7 @@ export async function renderHumanStream(
             result.files = phase.files
             result.webUrl = phase.webUrl
             result.demo = phase.demo
-            result.title = phase.title ?? titleBuf
+            result.title = phase.title ?? titleValue
             break
           case 'error':
             result.error = phase.message
@@ -88,19 +131,22 @@ export async function renderHumanStream(
     result.error = err instanceof Error ? err.message : String(err)
   }
 
-  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
+  clearInterval(tick)
+  const elapsed = fmtElapsed(Date.now() - startedAt)
 
   if (result.error) {
-    spin.stop(color.error(`Failed after ${elapsed}s`))
+    spin.stop(color.error(`Failed after ${elapsed}`))
     p.log.error(result.error)
     p.outro(color.error('Chat not created.'))
     return result
   }
 
-  spin.stop(`${color.success('✓')} Generated in ${color.bold(`${elapsed}s`)}`)
+  spin.stop(
+    `${color.success('✓')} Generated in ${color.bold(elapsed)} ${color.dim(`(${completedSteps.length} step${completedSteps.length === 1 ? '' : 's'})`)}`,
+  )
 
   if (result.title) {
-    p.log.step(`${color.bold(result.title)}`)
+    p.log.step(color.bold(result.title))
   }
   const rows: string[] = []
   if (result.chatId) rows.push(`${color.muted('chat    ')} ${result.chatId}`)
