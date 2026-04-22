@@ -100,9 +100,14 @@ export function msgCommand(): Command {
 
         await validateBody({ operationId: 'chats.sendMessage', body })
 
-        // Mirror the chat-create UX: stream in human mode, block in json,
-        // honor explicit --stream / --no-stream.
-        const wantStream = raw.stream === true || (raw.stream !== false && mode === 'human')
+        // Stream defaults: mirror chat create (human TTY always streams;
+        // --json non-TTY streams NDJSON to sidestep the 60s HTTP timeout;
+        // --json TTY blocks for `v0 … | jq` ergonomics). Override with
+        // --stream / --no-stream.
+        const wantStream =
+          raw.stream === true ||
+          (raw.stream !== false &&
+            (mode === 'human' || (mode === 'json' && !process.stdout.isTTY)))
 
         if (wantStream) {
           const stream = (await client.chats.sendMessage({
@@ -127,13 +132,23 @@ export function msgCommand(): Command {
             return
           }
 
-          // --json --stream: emit each frame as NDJSON on stdout
-          let lastFrame: unknown = null
+          // --json streaming: emit each frame as NDJSON, then a terminal
+          // {event:"envelope", data:{…}} line carrying the final chat
+          // snapshot so agents can `jq 'select(.event=="envelope") | .data'`.
+          let envelope: Record<string, unknown> | null = null
           for await (const frame of readSseStream(stream)) {
-            lastFrame = frame.data
             emitNdjsonEvent(frame.event, frame.data)
+            if (
+              frame.event === 'message' &&
+              frame.data &&
+              typeof frame.data === 'object' &&
+              (frame.data as Record<string, unknown>).object === 'chat'
+            ) {
+              envelope = frame.data as Record<string, unknown>
+            }
           }
-          recordResult({ streamed: true, lastFrame })
+          if (envelope) emitNdjsonEvent('envelope', envelope)
+          recordResult({ streamed: true, envelope })
           return
         }
 

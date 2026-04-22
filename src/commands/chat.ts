@@ -16,6 +16,23 @@ import { color } from '../lib/ui/color.ts'
 import { mergeParams, parseParamsJson, validateBody } from '../lib/validation/params.ts'
 import { buildFilesInitBody, readSource } from '../lib/workflows/init-from-local.ts'
 
+/**
+ * True when the frame looks like a `chat` or `message` snapshot with enough
+ * metadata to serve as the final envelope (chat id + latest version).
+ * Used to pick which NDJSON frame to re-emit as `{event:"envelope",data}`
+ * so agents can jq the final state without replaying every delta.
+ */
+function isChatSnapshot(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false
+  const d = data as Record<string, unknown>
+  return (
+    d.object === 'chat' &&
+    typeof d.id === 'string' &&
+    typeof d.latestVersion === 'object' &&
+    d.latestVersion !== null
+  )
+}
+
 function collect(value: string, prev: string[]): string[] {
   return [...prev, value]
 }
@@ -209,8 +226,19 @@ export function chatCommand(): Command {
           return
         }
 
-        // Default: stream in human mode, block in json mode. --stream/--no-stream overrides.
-        const wantStream = raw.stream === true || (raw.stream !== false && mode === 'human')
+        // Streaming defaults:
+        //   - human TTY          → stream (live transcript)
+        //   - --json non-TTY     → stream (NDJSON frames + final envelope) —
+        //                          the blocking POST hits a 60s HTTP timeout
+        //                          on large prompts and chat_id is lost, so
+        //                          streaming is the safer default.
+        //   - --json TTY         → block (classic `v0 … | jq` workflow)
+        //
+        // --stream / --no-stream overrides in all cases.
+        const wantStream =
+          raw.stream === true ||
+          (raw.stream !== false &&
+            (mode === 'human' || (mode === 'json' && !process.stdout.isTTY)))
 
         if (wantStream) {
           const stream = (await client.chats.create({
@@ -231,13 +259,21 @@ export function chatCommand(): Command {
             return
           }
 
-          // --json --stream: emit each frame as NDJSON on stdout
-          let lastFrame: unknown = null
+          // --json --stream (or --json non-TTY default): emit each frame as
+          // NDJSON on stdout, then a final {event:"envelope", data:{…}} line
+          // so agents can `jq -c 'select(.event=="envelope") | .data'` and
+          // get the same shape a blocking call would have returned.
+          let envelope: Record<string, unknown> | null = null
           for await (const frame of readSseStream(stream)) {
-            lastFrame = frame.data
             emitNdjsonEvent(frame.event, frame.data)
+            // The final `chat` snapshot carries latestVersion + files; use it
+            // as the envelope source.
+            if (frame.event === 'message' && isChatSnapshot(frame.data)) {
+              envelope = frame.data as Record<string, unknown>
+            }
           }
-          recordResult({ streamed: true, lastFrame })
+          if (envelope) emitNdjsonEvent('envelope', envelope)
+          recordResult({ streamed: true, envelope })
           return
         }
 
