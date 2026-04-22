@@ -199,12 +199,15 @@ export async function* streamDeployment(
       | null = null
 
     try {
+      // SDK returns { logs, nextSince, object } — NOT a `data`-wrapped
+      // envelope. The CLI's emitSuccess() adds the `data` wrapper for
+      // JSON output, but at the SDK layer the shape is flat.
       const rawLogs = (await client.deployments.findLogs({
         deploymentId: opts.deploymentId,
       })) as unknown as {
-        data?: { logs?: Array<{ text?: string; createdAt?: string; level?: string }> }
+        logs?: Array<{ text?: string; createdAt?: string; level?: string }>
       }
-      const entries = rawLogs?.data?.logs ?? []
+      const entries = rawLogs?.logs ?? []
 
       for (const entry of entries) {
         const createdAt = entry.createdAt ? Date.parse(entry.createdAt) : 0
@@ -288,22 +291,25 @@ export async function pollDeployment(client: V0Client, opts: PollOpts): Promise<
     }
 
     try {
+      // SDK shape: { logs, nextSince, object } — flat, not `data`-wrapped.
+      // Entry shape: { text, createdAt (ISO), level, type, id, deploymentId }.
       const logs = (await client.deployments.findLogs({
         deploymentId: opts.deploymentId,
         ...(lastLogTs ? { since: lastLogTs } : {}),
-      })) as unknown as { data?: Array<{ timestamp?: number; message?: string }> } | Array<unknown>
-
-      const entries = Array.isArray(logs)
-        ? (logs as Array<{ timestamp?: number; message?: string }>)
-        : (logs.data ?? [])
+      })) as unknown as {
+        logs?: Array<{ text?: string; createdAt?: string; level?: string }>
+      }
+      const entries = logs?.logs ?? []
       if (opts.ndjson) {
         for (const entry of entries) {
-          if (entry.timestamp && entry.timestamp > lastLogTs) lastLogTs = entry.timestamp
+          const ts = entry.createdAt ? Date.parse(entry.createdAt) : 0
+          if (Number.isFinite(ts) && ts > lastLogTs) lastLogTs = ts
           emitNdjsonEvent('log', entry)
         }
       } else if (entries.length > 0) {
         const latest = entries[entries.length - 1]
-        if (latest?.timestamp) lastLogTs = latest.timestamp
+        const ts = latest?.createdAt ? Date.parse(latest.createdAt) : 0
+        if (Number.isFinite(ts) && ts > 0) lastLogTs = ts
       }
     } catch {
       // logs can fail while queued; ignore and keep polling
