@@ -163,19 +163,23 @@ v0 chat init --type files --source ./my-template --json
 # T1 — iterate. Sync by default; --stream emits NDJSON frames.
 v0 msg send "$CHAT" --message "Add a sticky header" --json
 
-# Resolve newest version (T0)
+# Resolve newest version (T0) — only needed when you want to inspect or
+# reference the version id. `deploy create` auto-resolves the latest when
+# version-id is omitted.
 VER=$(v0 version list "$CHAT" --limit 1 --json | jq -r '.data.data[0].id')
 
 # T0 — download the version as a zip for local inspection
 v0 version download "$CHAT" "$VER" --out ./build.zip --json
 
 # T2 — preview deploy without side effect
-v0 deploy create "$CHAT" "$VER" --dry-run --json
+v0 deploy create "$CHAT" --dry-run --json
 
 # T2 — ship. --yes is required in non-TTY; --wait polls until terminal status.
 # --wait in human mode streams status transitions as past-tense steps
 # (Queued · 2s, Built · 45s, Deployed · 12s, …). --json emits NDJSON.
-v0 deploy create "$CHAT" "$VER" --yes --wait --json
+# Pass <version-id> explicitly when deploying an older snapshot; omit for latest.
+v0 deploy create "$CHAT" --yes --wait --json
+v0 deploy create "$CHAT" "$VER" --yes --wait --json    # pin to a specific ver
 ```
 
 ### 2. Create a chat from scratch

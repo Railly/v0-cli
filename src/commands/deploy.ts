@@ -92,15 +92,46 @@ export function deployCommand(): Command {
     )
 
   cmd
-    .command('create <chat-id> <version-id>')
-    .description('Deploy a chat version to Vercel (T2). Requires --yes or interactive confirm.')
+    .command('create <chat-id> [version-id]')
+    .description(
+      "Deploy a chat version to Vercel (T2). Omit version-id to use the chat's latest version. Requires --yes or interactive confirm.",
+    )
     .option('--project <id>', 'project id (defaults to chat owner)')
     .option('--wait', 'poll logs + errors until deployment reaches terminal state')
     .option('--interval <seconds>', 'poll interval', '3')
     .action(
       runCommand(async ({ client, mode, opts, cmd, recordResult }) => {
-        const [chatId, versionId] = cmd.args as [string, string]
+        const [chatId, explicitVersionId] = cmd.args as [string, string | undefined]
         const raw = cmd.opts<{ project?: string; wait?: boolean; interval?: string }>()
+
+        // Resolve version-id when not given. `findVersions(limit=1)` returns
+        // the newest. This is pure DX: agents should still pass explicit ids
+        // for audit clarity, but humans + one-shots no longer need the
+        // jq pipeline.
+        let versionId = explicitVersionId
+        if (!versionId) {
+          const versions = (await client.chats.findVersions({ chatId, limit: 1 })) as {
+            data?: Array<{ id?: string }>
+          }
+          const latest = versions.data?.[0]?.id
+          if (!latest) {
+            throw new CliError(
+              {
+                code: 'version_unresolved',
+                type: 'validation_error',
+                message: 'no versions found for chat',
+                userMessage: `Could not find any versions for chat ${chatId}. Create one with msg send first, or pass an explicit version-id.`,
+              },
+              4,
+            )
+          }
+          versionId = latest
+          if (mode === 'human') {
+            process.stderr.write(
+              `${color.dim('[deploy]')} ${color.muted('resolved latest version →')} ${color.accent(latest)}\n`,
+            )
+          }
+        }
         const preview = await buildDeployPreview(client, {
           chatId,
           versionId,
@@ -108,13 +139,39 @@ export function deployCommand(): Command {
         })
 
         if (!preview.projectId) {
+          // Help the user recover: show the top few projects so they can pick
+          // one, or the exact assign command. This is human-mode polish; JSON
+          // mode still gets a clean error envelope.
+          let hint =
+            'Could not determine projectId. Pass --project <id>, or run `v0 project assign <project-id> ' +
+            chatId +
+            '` to link this chat to a project first.'
+          if (mode === 'human') {
+            try {
+              const list = (await client.projects.find()) as {
+                data?: Array<{ id?: string; name?: string }>
+              }
+              const items = (list.data ?? []).filter(
+                (p): p is { id: string; name?: string } => typeof p.id === 'string',
+              )
+              if (items.length > 0) {
+                const top = items.slice(0, 5)
+                const lines = top
+                  .map((p) => `  ${color.muted(p.id.padEnd(14))} ${p.name ?? ''}`)
+                  .join('\n')
+                hint =
+                  `Could not determine projectId for chat ${chatId}. Pick one of your projects:\n${lines}\n\nThen pass --project <id>, or assign permanently:\n  v0 project assign <project-id> ${chatId}`
+              }
+            } catch {
+              // ignore — fall back to the plain hint
+            }
+          }
           throw new CliError(
             {
               code: 'project_unresolved',
               type: 'validation_error',
               message: 'could not resolve projectId',
-              userMessage:
-                'Could not determine projectId. Pass --project <id>, or move the chat into a project first.',
+              userMessage: hint,
             },
             2,
           )
