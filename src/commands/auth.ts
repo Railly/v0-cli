@@ -83,8 +83,11 @@ export function authCommand(): Command {
       const key = await p.password({
         message: 'Paste your v0 API key (from https://v0.app/chat/settings/keys):',
         mask: '•',
-        validate: (v) =>
-          v.startsWith('v1:') || v.length > 20 ? undefined : 'That does not look like a v0 key',
+        validate: (v) => {
+          if (!v || v.length < 10) return 'Key looks too short.'
+          if (v.startsWith('v1:') || v.length > 20) return undefined
+          return 'That does not look like a v0 key'
+        },
       })
       if (p.isCancel(key)) {
         p.cancel('Cancelled.')
