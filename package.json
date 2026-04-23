@@ -1,6 +1,6 @@
 {
   "name": "@crafter/v0-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent-first CLI for the v0 Platform API (api.v0.dev/v1). Built for AI agents with a human supervisor: trust ladder, audit trail, killswitch, rate-limit aware.",
   "license": "MIT",
   "author": "Railly Hugo <railly@crafterstation.com>",
@@ -9,6 +9,7 @@
     "url": "https://github.com/Railly/v0-cli.git"
   },
   "type": "module",
+  "main": "./dist/index.js",
   "bin": {
     "v0": "./dist/index.js"
   },
@@ -19,7 +20,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
@@ -35,6 +37,7 @@
   },
   "files": [
     "dist/",
+    "skill/",
     "README.md",
     "LICENSE"
   ],

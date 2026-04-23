@@ -88,7 +88,15 @@ export async function renderHumanStream(
               result.title = phase.title
               // Meta rows go into the renderer's summary block so the outro
               // flows cleanly: steps → meta → Done.
-              if (phase.chatId) yield { kind: 'meta', key: 'chat', value: phase.chatId }
+              if (phase.chatId) {
+                yield { kind: 'meta', key: 'chat', value: phase.chatId }
+                yield {
+                  kind: 'meta',
+                  key: 'url',
+                  value: `https://v0.app/chat/${phase.chatId}`,
+                  accent: true,
+                }
+              }
               if (phase.versionId) yield { kind: 'meta', key: 'version', value: phase.versionId }
               if (phase.files.length) {
                 const bytes = phase.files.reduce((a, f) => a + f.bytes, 0)
@@ -140,6 +148,10 @@ export async function renderHumanStream(
     process.stdout.write(`${list}\n`)
   }
   if (result.chatId) {
+    // Chat URL lives inside the summary block (emitted as `url` meta above).
+    // Next-step hints below give the canonical iterate + ship commands,
+    // plus a pointer to any existing deploys without making an extra API
+    // call on every run.
     process.stdout.write(
       `\n${color.dim('iterate:')} v0 msg send ${result.chatId} "<message>"\n`,
     )
@@ -147,6 +159,9 @@ export async function renderHumanStream(
     // omitted, so the shortest ship command is just `deploy create <chat>`.
     process.stdout.write(
       `${color.dim('ship:   ')} v0 deploy create ${result.chatId} --yes\n`,
+    )
+    process.stdout.write(
+      `${color.dim('deploys:')} v0 deploy list --chat ${result.chatId}\n`,
     )
   }
 
