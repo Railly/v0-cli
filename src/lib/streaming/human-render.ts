@@ -121,6 +121,18 @@ export async function renderHumanStream(
           }
         }
       }
+      // Stream ended without a `done` phase (e.g. conversational chats with
+      // no files/version). Emit the meta we collected so the summary still
+      // surfaces chat id + URL + title.
+      if (result.chatId) {
+        yield { kind: 'meta', key: 'chat', value: result.chatId }
+        yield {
+          kind: 'meta',
+          key: 'url',
+          value: `https://v0.app/chat/${result.chatId}`,
+          accent: true,
+        }
+      }
       yield { kind: 'done' }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
